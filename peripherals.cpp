@@ -56,9 +56,15 @@ int servoTiltPin;
 // ambient / module temperature reading 
 int ds18b20Pin; // if INCLUDE_DS18B20 true
 
-// batt monitoring 
+// batt monitoring
 // only pin 33 can be used on ESP32-Cam module as it is the only available analog pin
-int voltPin; 
+int voltPin;
+
+// LDR sensor
+bool ldrUse;
+int ldrPin;
+int ldrLedPin;
+int ldrInterval;
 
 // additional peripheral configuration
 // configure for specific servo model, eg for SG90
@@ -318,6 +324,58 @@ static void setupBatt() {
       LOG_INF("Monitor batt voltage");
       debugMemory("setupBatt");
     } else LOG_WRN("No voltage pin defined");
+  }
+}
+
+/************ LDR (light dependent resistor) sensor ************/
+
+// Reads reflected light level using differential measurement:
+// take reading with illumination LED off (ambient), then with LED on,
+// subtract to isolate the LED's contribution from background light.
+// Recommended wiring: LDR between 3V3 and ldrPin with 10k pull-down to GND.
+// For cat feeder food level: LED shines into feeder, LDR reads reflection.
+// Use GPIO1 (ADC1_CH0) for ldrPin and GPIO15 for ldrLedPin; ADC2 is not
+// safe to use when WiFi is active.
+
+static int currentLdrVal = -1; // -1 = not monitored
+TaskHandle_t ldrHandle = NULL;
+
+int readLDR() {
+  return currentLdrVal;
+}
+
+static void ldrTask(void* parameter) {
+  if (ldrInterval < 1) ldrInterval = 1;
+  while (true) {
+    // read ambient level first (LED off)
+    int ambient = smoothAnalog(ldrPin);
+    if (ldrLedPin > 0) {
+      // turn on illumination LED, wait for LDR to settle, read, turn off
+      digitalWrite(ldrLedPin, HIGH);
+      delay(20); // ~20ms settle time for LDR response
+      int illuminated = smoothAnalog(ldrPin);
+      digitalWrite(ldrLedPin, LOW);
+      // differential: eliminate ambient contribution
+      currentLdrVal = max(0, illuminated - ambient);
+    } else {
+      currentLdrVal = ambient;
+    }
+    delay(ldrInterval * 1000);
+  }
+  vTaskDelete(NULL);
+}
+
+static void setupLDR() {
+  if (ldrUse) {
+    if (ldrPin > 0) {
+      if (ldrLedPin > 0) {
+        pinMode(ldrLedPin, OUTPUT);
+        digitalWrite(ldrLedPin, LOW);
+      }
+      xTaskCreateWithCaps(&ldrTask, "ldrTask", SENSOR_STACK_SIZE, NULL, SENSOR_PRI, &ldrHandle, HEAP_MEM);
+      LOG_INF("Monitor LDR on pin %d%s", ldrPin, ldrLedPin > 0 ? ", with LED illumination" : "");
+      debugMemory("setupLDR");
+    } else LOG_WRN("No LDR pin defined");
   }
 }
 
@@ -716,6 +774,7 @@ void prepPeripherals() {
   // initial setup of each peripheral on client or extender
   setupADC();
   setupBatt();
+  setupLDR();
   setupLamp();
   prepPIR();
   prepTemperature();

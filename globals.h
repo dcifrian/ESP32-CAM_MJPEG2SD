@@ -176,6 +176,7 @@ void reloadConfigs();
 float readInternalTemp();
 float readTemperature(bool isCelsius, bool onlyDS18 = false);
 float readVoltage();
+int readLDR();
 void remote_log_init();
 void remoteServerClose(NetworkClientSecure& sclient);
 bool remoteServerConnect(NetworkClientSecure& sclient, const char* serverName, uint16_t serverPort, const char* serverCert, uint8_t connIdx);

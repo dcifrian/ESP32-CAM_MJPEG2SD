@@ -28,18 +28,19 @@
 
 // User's ESP32S3 cam board
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-#define CAMERA_MODEL_ESP32_S3_CAM
+//#define CAMERA_MODEL_ESP32_S3_CAM
 //#define CAMERA_MODEL_FREENOVE_ESP32S3_CAM
 //#define CAMERA_MODEL_XIAO_ESP32S3
 //#define CAMERA_MODEL_NEW_ESPS3_RE1_0
 //#define CAMERA_MODEL_M5STACK_CAMS3_UNIT
-//#define CAMERA_MODEL_ESP32S3_EYE 
+//#define CAMERA_MODEL_ESP32S3_EYE
 //#define CAMERA_MODEL_ESP32S3_CAM_LCD
 //#define CAMERA_MODEL_DFRobot_FireBeetle2_ESP32S3
 //#define CAMERA_MODEL_DFRobot_Romeo_ESP32S3
 //#define CAMERA_MODEL_XENOIONEX
 //#define CAMERA_MODEL_Waveshare_ESP32_S3_ETH
 //#define CAMERA_MODEL_DFRobot_ESP32_S3_AI_CAM
+#define CAMERA_MODEL_UICPAL_ESP32S3_CAM
 //#define AUXILIARY
 
 // User's ESP32C3 board (auxiliary only)
@@ -429,8 +430,14 @@ extern int servoPanPin;
 extern int servoTiltPin;
 // ambient / module temperature reading 
 extern int ds18b20Pin; // if INCLUDE_DS18B20 true
-// batt monitoring 
-extern int voltPin; 
+// batt monitoring
+extern int voltPin;
+
+// LDR (light dependent resistor) sensor
+extern bool ldrUse;    // true to enable LDR monitoring
+extern int ldrPin;     // ADC pin connected to LDR (recommended: GPIO1 = ADC1_CH0)
+extern int ldrLedPin;  // pin for illumination LED; -1 if unused
+extern int ldrInterval; // seconds between readings
 
 // audio
 extern bool AudActive;
@@ -525,6 +532,7 @@ extern char RTSP_Pass[];
 
 // task handling
 extern TaskHandle_t battHandle;
+extern TaskHandle_t ldrHandle;
 extern TaskHandle_t captureHandle;
 extern TaskHandle_t DS18B20handle;
 extern TaskHandle_t emailHandle;

@@ -126,6 +126,10 @@ bool updateAppStatus(const char* variable, const char* value, bool fromUser) {
   else if (!strcmp(variable, "buzzerPin")) buzzerPin = intVal; 
   else if (!strcmp(variable, "buzzerDuration")) buzzerDuration = intVal;
   else if (!strcmp(variable, "ds18b20Pin")) ds18b20Pin = intVal;
+  else if (!strcmp(variable, "ldrUse")) ldrUse = (bool)intVal;
+  else if (!strcmp(variable, "ldrPin")) ldrPin = intVal;
+  else if (!strcmp(variable, "ldrLedPin")) ldrLedPin = intVal;
+  else if (!strcmp(variable, "ldrInterval")) ldrInterval = intVal;
 #endif
 #if INCLUDE_I2C
   else if (!strcmp(variable, "I2Csda")) I2Csda = intVal;
@@ -463,7 +467,10 @@ void buildAppJsonString(bool filter) {
   else p += sprintf(p, "\"atemp\":\"n/a\",");
   float currentVoltage = readVoltage();
   if (currentVoltage < 0) p += sprintf(p, "\"battv\":\"n/a\",");
-  else p += sprintf(p, "\"battv\":\"%0.1fV\",", currentVoltage); 
+  else p += sprintf(p, "\"battv\":\"%0.1fV\",", currentVoltage);
+  int ldrReading = readLDR();
+  if (ldrReading < 0) p += sprintf(p, "\"ldrVal\":\"n/a\",");
+  else p += sprintf(p, "\"ldrVal\":\"%d%%\",", ldrReading * 100 / MAX_ADC);
   p += sprintf(p, "\"camModel\":\"%s\",", camModel);
 #if INCLUDE_PERIPH
   p += sprintf(p, "\"SVactive\":\"%d\",", SVactive); 
@@ -550,6 +557,9 @@ float readVoltage() {
 }
 float readTemperature(bool isCelsius, bool onlyDS18) {
   return readInternalTemp();
+}
+int readLDR() {
+  return -1; // not monitored
 }
 #endif
 
@@ -926,6 +936,10 @@ voltLow~3~3~N~Warning level for low voltage
 voltInterval~5~3~N~Voltage check interval (mins)
 voltPin~~3~N~ADC Pin used for battery voltage
 voltUse~0~3~C~Use Voltage check
+ldrPin~~3~N~ADC Pin used for LDR sensor (recommended: GPIO1)
+ldrLedPin~~3~N~Pin for LDR illumination LED (recommended: GPIO15; -1 to disable)
+ldrInterval~1~3~N~LDR check interval (secs)
+ldrUse~0~3~C~Use LDR sensor
 wakePin~~3~N~Pin used to wake app from sleep
 wakeLevel~1~3~N~Pin level (0,1) to wake app from sleep
 wakeUse~0~3~C~Deep sleep app during night
