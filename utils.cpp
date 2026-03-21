@@ -311,8 +311,8 @@ static bool startEth() {
 static bool startWifi(bool firstcall = true) {
   // start wifi station (and wifi AP if allowed or station not defined)
   if (firstcall) {
-    WiFi.setCountry("EU"); // allow channels 1-13 (default US only allows 1-11)
     WiFi.mode(WIFI_AP_STA);
+    esp_wifi_set_country_code("EU", false); // allow channels 1-13 (default US only allows 1-11)
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
     WiFi.STA.setAutoReconnect(false); // Set whether module will attempt to reconnect to an access point in case it is disconnected
     WiFi.AP.clear();
