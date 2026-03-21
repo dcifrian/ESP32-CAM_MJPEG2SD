@@ -543,6 +543,7 @@
 #define PCLK_GPIO_NUM      7
 
 #define LED_GPIO_NUM      34
+#define NO_SD  // no SD card on this board
 
 #elif defined(CAMERA_MODEL_UICPAL_ESP32)
 #define CAM_BOARD "CAMERA_MODEL_UICPAL_ESP32"

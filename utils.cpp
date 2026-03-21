@@ -39,8 +39,8 @@ UBaseType_t HEAP_MEM; // allow some task stacks to use psram if available
 /** Use the web interface to configure wifi settings **/
 
 char hostName[MAX_HOST_LEN] = ""; // Default Host name
-char ST_SSID[MAX_HOST_LEN]  = ""; //Default router ssid
-char ST_Pass[MAX_PWD_LEN] = ""; //Default router passd
+char ST_SSID[MAX_HOST_LEN]  = "YourWifiSSID"; //Default router ssid
+char ST_Pass[MAX_PWD_LEN] = "YourWifiPassword"; //Default router passd
 
 // leave following blank for dhcp
 char ST_ip[MAX_IP_LEN]  = ""; // Static IP
