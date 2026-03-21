@@ -328,7 +328,7 @@ static bool startWifi(bool firstcall = true) {
     // Stop trying on failure timeout, will try to reconnect later by ping
     wlStat = WL_NO_SSID_AVAIL;
     if (strlen(ST_SSID)) {
-      while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 5000)  {
+      while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 15000)  {
         logPrint(".");
         delay(500);
       }
