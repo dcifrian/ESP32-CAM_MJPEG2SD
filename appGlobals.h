@@ -62,7 +62,7 @@
 #define INCLUDE_AUDIO false   // audio.cpp (microphones & speakers)
 #define INCLUDE_PERIPH false  // peripherals.cpp (servos, PIR, led etc)
 #define INCLUDE_SMTP false    // smtp.cpp (email)
-#define INCLUDE_MQTT false    // mqtt.cpp (MQTT)
+#define INCLUDE_MQTT true     // mqtt.cpp (MQTT)
 #define INCLUDE_HASIO false   // mqtt.cpp (Send home assistant discovery messages). Needs INCLUDE_MQTT true
 
 #define INCLUDE_CERTS false   // certificates.cpp (https and server certificate checking)
