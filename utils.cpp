@@ -127,6 +127,26 @@ const char* getEncType(int ssidIndex) {
   }
 }
 
+static const char* wifiDisconnReason(uint8_t r) {
+  switch (r) {
+    case 1:   return "UNSPECIFIED";
+    case 2:   return "AUTH_EXPIRE";
+    case 3:   return "AUTH_LEAVE";
+    case 8:   return "ASSOC_LEAVE";
+    case 15:  return "4WAY_HANDSHAKE_TIMEOUT";
+    case 23:  return "BEACON_TIMEOUT";
+    case 24:  return "NO_AP_FOUND";
+    case 25:  return "AUTH_FAIL";
+    case 26:  return "ASSOC_FAIL";
+    case 200: return "BEACON_TIMEOUT(200)";
+    case 201: return "NO_AP_FOUND(201)";
+    case 202: return "AUTH_FAIL(202)";
+    case 203: return "ASSOC_FAIL(203)";
+    case 204: return "HANDSHAKE_TIMEOUT(204)";
+    default:  return "OTHER";
+  }
+}
+
 static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
   // callback to report on network events
   switch (event) {
@@ -152,7 +172,11 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_STA_LOST_IP: LOG_INF("Wifi Station lost IP"); break;
     case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED: break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED: LOG_INF("WiFi Station connection to %s, using hostname: %s", ST_SSID, hostName); break;
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: LOG_INF("WiFi Station disconnected"); break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      LOG_WRN("WiFi Station disconnected, reason: %d (%s), heap: %u, mqtt_active: %d",
+        info.wifi_sta_disconnected.reason, wifiDisconnReason(info.wifi_sta_disconnected.reason),
+        ESP.getFreeHeap(), mqtt_active);
+      break;
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: LOG_INF("WiFi AP client connection"); break;
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED: LOG_INF("WiFi AP client disconnection"); break;
     case ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED: break;
@@ -311,7 +335,11 @@ static bool startEth() {
 static bool startWifi(bool firstcall = true) {
   // start wifi station (and wifi AP if allowed or station not defined)
 #if INCLUDE_MQTT
-  if (!firstcall && mqtt_active) stopMqttClient(); // stop MQTT before WiFi restart to prevent TCP interference
+  if (!firstcall && mqtt_active) {
+    LOG_WRN("Stopping MQTT before WiFi restart, heap: %u", ESP.getFreeHeap());
+    stopMqttClient();
+    LOG_WRN("MQTT stopped, heap now: %u", ESP.getFreeHeap());
+  }
 #endif
   if (firstcall) {
     WiFi.mode(WIFI_AP_STA);
@@ -442,6 +470,7 @@ static void pingSuccess(esp_ping_handle_t hdl, void *args) {
   }
   resetWatchDog(0, wifiTimeoutSecs * 1000 * 2);
   if (dataFilesChecked) resetCrashLoop();
+  LOG_INF("Ping OK, heap: %u", ESP.getFreeHeap());
   statusCheck();
 }
 
@@ -450,6 +479,7 @@ static void pingTimeout(esp_ping_handle_t hdl, void *args) {
   // but some routers may not respond to ping - https://github.com/s60sc/ESP32-CAM_MJPEG2SD/issues/221
   // so setting usePing to false ignores ping failure if connection still present
   resetWatchDog(0, wifiTimeoutSecs * 1000 * 2);
+  LOG_WRN("Ping timeout, WiFi status: %d, heap: %u, mqtt_active: %d", WiFi.STA.status(), ESP.getFreeHeap(), mqtt_active);
   if (netMode > 0) {
     if (usePing) {
       LOG_WRN("Failed to ping gateway, restart ethernet ...");

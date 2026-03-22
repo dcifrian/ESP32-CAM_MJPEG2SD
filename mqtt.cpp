@@ -213,23 +213,24 @@ static void mqttTask(void* parameter) {
 }
 
 void stopMqttClient() {
-  if (mqtt_client == nullptr) return;
+  if (mqtt_client == nullptr) {
+    LOG_INF("stopMqttClient: already stopped");
+    return;
+  }
+  LOG_INF("stopMqttClient: was connected=%d", mqttConnected);
   if (mqttConnected){
     esp_mqtt_client_publish(mqtt_client, lwt_topic, "offline", 0, MQTT_LWT_QOS, MQTT_LWT_RETAIN);
     vTaskDelay(1000 / portTICK_RATE_MS);
   }
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_stop(mqtt_client));
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_destroy(mqtt_client));    
-  LOG_VRB("Checking task..%u", mqttTaskHandle);
+  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_destroy(mqtt_client));
   if ( mqttTaskHandle != NULL ) {
-    LOG_VRB("Unlock task..");
     xTaskNotifyGive(mqttTaskHandle); //Unblock task
     vTaskDelay(1500 / portTICK_RATE_MS);
-    LOG_VRB("Deleted task..?");
   }
-  LOG_VRB("Exiting..");
   mqttConnected = false;
   mqtt_client = nullptr;
+  LOG_INF("stopMqttClient: done, heap: %u", ESP.getFreeHeap());
 }
 
 void startMqttClient(void){  
@@ -245,12 +246,13 @@ void startMqttClient(void){
     
   if (!netIsConnected()) {
     mqttConnected = false;
-    LOG_VRB("Network disconnected.. Retry mqtt on connect");
+    LOG_WRN("Network disconnected.. Retry mqtt on connect");
     return;
   }
-  
+
   char mqtt_uri[FILE_NAME_LEN];
   sprintf(mqtt_uri, "mqtt://%s:%s", mqtt_broker, mqtt_port);
+  LOG_INF("startMqttClient: uri=%s user='%s' heap=%u", mqtt_uri, mqtt_user, ESP.getFreeHeap());
   snprintf(lwt_topic, FILE_NAME_LEN, "%ssensor/%s/lwt", mqtt_topic_prefix, hostName);
   snprintf(cmd_topic, FILE_NAME_LEN, "%ssensor/%s/cmd", mqtt_topic_prefix, hostName);
   snprintf(image_topic, FILE_NAME_LEN, "%ssensor/%s/still", mqtt_topic_prefix, hostName);
