@@ -310,6 +310,9 @@ static bool startEth() {
 
 static bool startWifi(bool firstcall = true) {
   // start wifi station (and wifi AP if allowed or station not defined)
+#if INCLUDE_MQTT
+  if (!firstcall && mqtt_active) stopMqttClient(); // stop MQTT before WiFi restart to prevent TCP interference
+#endif
   if (firstcall) {
     WiFi.mode(WIFI_AP_STA);
     wifi_country_t country = {.cc="EU", .schan=1, .nchan=13, .max_tx_power=80, .policy=WIFI_COUNTRY_POLICY_MANUAL};
