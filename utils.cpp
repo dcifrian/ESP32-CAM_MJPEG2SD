@@ -10,6 +10,7 @@
 // some functions based on code contributed by gemi254
 
 #include "appGlobals.h"
+#include <esp_wifi.h>
 
 bool dbgVerbose = false;
 bool timeSynchronized = false;
@@ -1276,7 +1277,6 @@ void debugMemory(const char* caller) {
 
 /****************** send device to sleep (light or deep), watchdog, panics ******************/
 
-#include <esp_wifi.h>
 #include <driver/gpio.h>
 
 void doRestart(const char* restartStr) {

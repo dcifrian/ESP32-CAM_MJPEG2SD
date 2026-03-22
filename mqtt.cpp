@@ -214,24 +214,23 @@ static void mqttTask(void* parameter) {
 }
 
 void stopMqttClient() {
-  if (mqtt_client == nullptr) {
-    LOG_INF("stopMqttClient: already stopped");
-    return;
-  }
-  LOG_INF("stopMqttClient: was connected=%d", mqttConnected);
+  if (mqtt_client == nullptr) return;
   if (mqttConnected){
     esp_mqtt_client_publish(mqtt_client, lwt_topic, "offline", 0, MQTT_LWT_QOS, MQTT_LWT_RETAIN);
     vTaskDelay(1000 / portTICK_RATE_MS);
   }
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_stop(mqtt_client));
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_destroy(mqtt_client));
+  LOG_VRB("Checking task..%u", mqttTaskHandle);
   if ( mqttTaskHandle != NULL ) {
+    LOG_VRB("Unlock task..");
     xTaskNotifyGive(mqttTaskHandle); //Unblock task
     vTaskDelay(1500 / portTICK_RATE_MS);
+    LOG_VRB("Deleted task..?");
   }
+  LOG_VRB("Exiting..");
   mqttConnected = false;
   mqtt_client = nullptr;
-  LOG_INF("stopMqttClient: done, heap: %u", ESP.getFreeHeap());
 }
 
 void startMqttClient(void){  
