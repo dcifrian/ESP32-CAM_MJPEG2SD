@@ -128,13 +128,14 @@ static void mqtt_error_handler(void *handler_args, esp_event_base_t base, int32_
 void sendMqttImage(){
   uint32_t startTime = millis();
   if (!strlen(mqtt_topic_prefix)) return;
+  if (!mqtt_client || !mqttConnected) { LOG_WRN("sendMqttImage: MQTT not connected"); return; }
   doKeepFrame = true;
   while (doKeepFrame && millis() - startTime < 4 * MAX_FRAME_WAIT) delay(100);
   if (!doKeepFrame && alertBufferSize) {
      const char* picBuff = (const char*)(alertBuffer);
      int id = esp_mqtt_client_publish(mqtt_client, image_topic, picBuff, alertBufferSize, MQTT_QOS, 0);
      LOG_VRB("Sent pic, size: %lu", alertBufferSize );
-  }else{
+  } else {
     LOG_WRN("Fail to send image");
   }
 }

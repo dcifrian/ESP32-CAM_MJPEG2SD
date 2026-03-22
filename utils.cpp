@@ -127,26 +127,6 @@ const char* getEncType(int ssidIndex) {
   }
 }
 
-static const char* wifiDisconnReason(uint8_t r) {
-  switch (r) {
-    case 1:   return "UNSPECIFIED";
-    case 2:   return "AUTH_EXPIRE";
-    case 3:   return "AUTH_LEAVE";
-    case 8:   return "ASSOC_LEAVE";
-    case 15:  return "4WAY_HANDSHAKE_TIMEOUT";
-    case 23:  return "BEACON_TIMEOUT";
-    case 24:  return "NO_AP_FOUND";
-    case 25:  return "AUTH_FAIL";
-    case 26:  return "ASSOC_FAIL";
-    case 200: return "BEACON_TIMEOUT(200)";
-    case 201: return "NO_AP_FOUND(201)";
-    case 202: return "AUTH_FAIL(202)";
-    case 203: return "ASSOC_FAIL(203)";
-    case 204: return "HANDSHAKE_TIMEOUT(204)";
-    default:  return "OTHER";
-  }
-}
-
 static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
   // callback to report on network events
   switch (event) {
@@ -173,9 +153,8 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED: break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED: LOG_INF("WiFi Station connection to %s, using hostname: %s", ST_SSID, hostName); break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      LOG_WRN("WiFi Station disconnected, reason: %d (%s), heap: %u, mqtt_active: %d",
-        info.wifi_sta_disconnected.reason, wifiDisconnReason(info.wifi_sta_disconnected.reason),
-        ESP.getFreeHeap(), mqtt_active);
+      LOG_WRN("WiFi Station disconnected, reason: %d, heap: %u",
+        info.wifi_sta_disconnected.reason, ESP.getFreeHeap());
       break;
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: LOG_INF("WiFi AP client connection"); break;
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED: LOG_INF("WiFi AP client disconnection"); break;
