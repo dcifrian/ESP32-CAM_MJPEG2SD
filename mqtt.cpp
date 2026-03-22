@@ -246,35 +246,27 @@ void startMqttClient(void){
     
   if (!netIsConnected()) {
     mqttConnected = false;
-    LOG_WRN("Network disconnected.. Retry mqtt on connect");
+    LOG_VRB("Network disconnected.. Retry mqtt on connect");
     return;
   }
 
-  char mqtt_uri[FILE_NAME_LEN];
+  static char mqtt_uri[FILE_NAME_LEN];
   sprintf(mqtt_uri, "mqtt://%s:%s", mqtt_broker, mqtt_port);
-  LOG_INF("startMqttClient: uri=%s user='%s' heap=%u", mqtt_uri, mqtt_user, ESP.getFreeHeap());
+  LOG_VRB("startMqttClient: uri=%s user='%s' heap=%u", mqtt_uri, mqtt_user, ESP.getFreeHeap());
   snprintf(lwt_topic, FILE_NAME_LEN, "%ssensor/%s/lwt", mqtt_topic_prefix, hostName);
   snprintf(cmd_topic, FILE_NAME_LEN, "%ssensor/%s/cmd", mqtt_topic_prefix, hostName);
   snprintf(image_topic, FILE_NAME_LEN, "%ssensor/%s/still", mqtt_topic_prefix, hostName);
 
-  esp_mqtt_client_config_t mqtt_cfg = {
-    .broker = {
-      .address = { .uri = mqtt_uri },
-    },
-    .credentials = {
-      .username = mqtt_user,
-      .client_id = hostName,
-      .authentication = { .password = mqtt_user_Pass },
-    },
-    .session = {
-      .last_will = {
-        .topic = lwt_topic,
-        .msg = "offline",
-        .qos = MQTT_LWT_QOS,
-        .retain = MQTT_LWT_RETAIN,
-      },
-    },
-  };
+  static esp_mqtt_client_config_t mqtt_cfg;
+  memset(&mqtt_cfg, 0, sizeof(mqtt_cfg));
+  mqtt_cfg.broker.address.uri = mqtt_uri;
+  mqtt_cfg.credentials.username = mqtt_user;
+  mqtt_cfg.credentials.client_id = hostName;
+  mqtt_cfg.credentials.authentication.password = mqtt_user_Pass;
+  mqtt_cfg.session.last_will.topic = lwt_topic;
+  mqtt_cfg.session.last_will.msg = "offline";
+  mqtt_cfg.session.last_will.qos = MQTT_LWT_QOS;
+  mqtt_cfg.session.last_will.retain = MQTT_LWT_RETAIN;
 
   mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
   LOG_INF("Mqtt connect to %s...", mqtt_uri);
