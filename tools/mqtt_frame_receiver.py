@@ -45,7 +45,7 @@ def parse_args():
     return p.parse_args()
 
 
-def on_connect(client, userdata, flags, rc, properties=None):
+def on_connect(client, userdata, flags, rc, *args):
     if rc == 0:
         image_topic  = userdata["image_topic"]
         motion_topic = userdata["motion_topic"]
@@ -91,7 +91,11 @@ def main():
         "out_dir":      args.outdir,
     }
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata=userdata)
+    # CallbackAPIVersion was introduced in paho-mqtt 2.0
+    if hasattr(mqtt, "CallbackAPIVersion"):
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata=userdata)
+    else:
+        client = mqtt.Client(userdata=userdata)
     client.on_connect = on_connect
     client.on_message = on_message
 
