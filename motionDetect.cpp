@@ -21,6 +21,9 @@
 */
 
 #include "appGlobals.h"
+#if INCLUDE_MQTT
+void sendMqttImage(); // defined in mqtt.cpp
+#endif
 
 #if INCLUDE_TINYML
 #include TINY_ML_LIB
