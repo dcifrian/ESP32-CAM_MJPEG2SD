@@ -129,10 +129,15 @@ void mqttPublishFrame() {
   // Publish the frame already captured in alertBuffer directly from the capture task.
   // Unlike sendMqttImage() this does NOT use the doKeepFrame wait loop, so it is safe
   // to call from within processFrame() without risking a deadlock.
+  // QoS 0 is used intentionally: JPEG frames can be 10-100 KB and QoS 1 requires the
+  // message to fit in the ESP MQTT outgoing buffer (default 1024 bytes), which causes
+  // silent publish failures for any non-trivial image size.
   if (!mqtt_client || !mqttConnected) return;
   if (!alertBuffer || !alertBufferSize) return;
-  esp_mqtt_client_publish(mqtt_client, image_topic, (const char*)alertBuffer, alertBufferSize, MQTT_QOS, 0);
-  LOG_VRB("mqttPublishFrame: sent %lu bytes to %s", alertBufferSize, image_topic);
+  if (!strlen(image_topic)) { LOG_WRN("mqttPublishFrame: image_topic not set"); return; }
+  LOG_INF("mqttPublishFrame: publishing %lu bytes to %s", alertBufferSize, image_topic);
+  int id = esp_mqtt_client_publish(mqtt_client, image_topic, (const char*)alertBuffer, alertBufferSize, 0, 0);
+  if (id < 0) LOG_WRN("mqttPublishFrame: publish failed (id=%d)", id);
 }
 
 void sendMqttImage(){
