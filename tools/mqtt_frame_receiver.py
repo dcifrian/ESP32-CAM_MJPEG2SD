@@ -71,6 +71,12 @@ def on_connect(client, userdata, flags, rc, *args):
         print(f"[+] Connected to broker. Subscribed to:")
         print(f"    {image_topic}")
         print(f"    {motion_topic}")
+        # Ask the ESP32 to publish a fresh frame immediately so we don't have to
+        # wait for the next motion event to confirm things are working.
+        cmd_topic = userdata["cmd_topic"]
+        if cmd_topic:
+            client.publish(cmd_topic, "still")
+            print(f"[*] Sent 'still' request to {cmd_topic}")
     else:
         print(f"[!] Connection failed, rc={rc}")
 
@@ -112,9 +118,13 @@ def main():
     image_topic  = f"{args.prefix}sensor/{device}/still"
     motion_topic = f"{args.prefix}sensor/{device}/state"
 
+    # cmd_topic is only set when a specific hostname is known (can't publish to wildcard)
+    cmd_topic = f"{args.prefix}sensor/{args.hostname}/cmd" if args.hostname else ""
+
     userdata = {
         "image_topic":  image_topic,
         "motion_topic": motion_topic,
+        "cmd_topic":    cmd_topic,
         "prefix":       args.prefix,
         "out_dir":      args.outdir,
     }
