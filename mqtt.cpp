@@ -383,7 +383,6 @@ void sendMqttHasDiscovery(){
   sendHasEntities ("restart", "Restart device", "", "mdi:restart", "config", "", "reset");
   //Home Asssistant Camera
   sendHasEntities (hostName, "cam", "", "mdi:video", "camera", "still");
-  mqttPublishPath("cmd", "still");
   if (isCapturing) mqttPublishPath("record", "on");
   else mqttPublishPath("record", "off");
   mqttPublishPath("motion", "off"); 
