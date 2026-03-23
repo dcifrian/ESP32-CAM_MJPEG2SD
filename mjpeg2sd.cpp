@@ -447,9 +447,6 @@ static boolean processFrame() {
   if (haveMotion && !prevMotion) {
     // start of movement detection
     keepFrame(fb);
-#if INCLUDE_MQTT
-    if (mqtt_active) mqttPublishFrame(); // send trigger frame to computer
-#endif
 #if INCLUDE_PERIPH
     buzzerAlert(true); // sound buzzer if enabled
     if (lampAuto && nightTime) setLamp(lampLevel);  // switch on lamp if requested
