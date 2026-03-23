@@ -26,7 +26,9 @@ It also publishes JSON motion events to:
 
 import argparse
 import os
+import sys
 import time
+import traceback
 import paho.mqtt.client as mqtt
 
 # ---------------------------------------------------------------------------
@@ -63,68 +65,74 @@ def hostname_from_topic(topic):
 
 
 def on_connect(client, userdata, flags, rc, *args):
+    # rc is an int (paho v1) or ReasonCode object (paho v2); both support == 0
+    print(f"[dbg] on_connect called, rc={rc!r}")
     if rc == 0:
         image_topic  = userdata["image_topic"]
         motion_topic = userdata["motion_topic"]
-        client.subscribe(image_topic)
-        client.subscribe(motion_topic)
-        print(f"[+] Connected to broker. Subscribed to:")
-        print(f"    {image_topic}")
-        print(f"    {motion_topic}")
-        # Ask the ESP32 to publish a fresh frame immediately so we don't have to
-        # wait for the next motion event to confirm things are working.
-        cmd_topic = userdata["cmd_topic"]
-        if cmd_topic:
-            client.publish(cmd_topic, "still")
-            print(f"[*] Sent 'still' request to {cmd_topic}")
+
+        r1 = client.subscribe(image_topic)
+        r2 = client.subscribe(motion_topic)
+        print(f"[+] Connected. Subscribed to:")
+        print(f"    {image_topic}  -> result={r1}")
+        print(f"    {motion_topic} -> result={r2}")
     else:
         print(f"[!] Connection failed, rc={rc}")
 
 
 def on_message(client, userdata, msg):
-    out_dir  = userdata["out_dir"]
-    prefix   = userdata["prefix"]
-    hostname = hostname_from_topic(msg.topic)
+    # This line prints for EVERY received message before any processing.
+    print(f"[dbg] on_message: topic={msg.topic!r}  len={len(msg.payload)}", flush=True)
+    try:
+        out_dir  = userdata["out_dir"]
+        prefix   = userdata["prefix"]
+        hostname = hostname_from_topic(msg.topic)
 
-    # Derive the expected suffix for this topic
-    still_suffix  = f"{prefix}sensor/{hostname}/still"
-    motion_suffix = f"{prefix}sensor/{hostname}/state"
+        still_suffix  = f"{prefix}sensor/{hostname}/still"
+        motion_suffix = f"{prefix}sensor/{hostname}/state"
 
-    if msg.topic == still_suffix:
-        # Binary JPEG payload
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(out_dir, f"motion_{hostname}_{ts}.jpg")
-        with open(filename, "wb") as f:
-            f.write(msg.payload)
-        print(f"[+] Frame saved: {filename}  ({len(msg.payload)} bytes)")
+        if msg.topic == still_suffix:
+            # Binary JPEG payload
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(out_dir, f"motion_{hostname}_{ts}.jpg")
+            with open(filename, "wb") as f:
+                f.write(msg.payload)
+            print(f"[+] Frame saved: {filename}  ({len(msg.payload)} bytes)")
 
-        # Hook: call your YOLO pipeline here, e.g.:
-        #   run_yolo(filename)
+            # Hook: call your YOLO pipeline here, e.g.:
+            #   run_yolo(filename)
 
-    elif msg.topic == motion_suffix:
-        # JSON status message
-        print(f"[motion/{hostname}] {msg.payload.decode('utf-8', errors='replace')}")
+        elif msg.topic == motion_suffix:
+            # JSON status message
+            print(f"[motion/{hostname}] {msg.payload.decode('utf-8', errors='replace')}")
 
-    else:
-        print(f"[?] Unknown topic {msg.topic}  ({len(msg.payload)} bytes)")
+        else:
+            print(f"[?] Unexpected topic {msg.topic}  ({len(msg.payload)} bytes)")
+
+    except Exception:
+        print(f"[!] Exception in on_message:", file=sys.stderr)
+        traceback.print_exc()
+
+
+def on_callback_exception(client, userdata, callback, exception):
+    """Catch exceptions that paho v2 silences in callbacks."""
+    print(f"[!] Exception in callback {callback.__name__}: {exception}", file=sys.stderr)
+    traceback.print_exception(type(exception), exception, exception.__traceback__)
 
 
 def main():
     args = parse_args()
 
+    print(f"[*] paho-mqtt version: {mqtt.__version__}")
     os.makedirs(args.outdir, exist_ok=True)
 
     device = args.hostname if args.hostname else "+"  # "+" = MQTT single-level wildcard
     image_topic  = f"{args.prefix}sensor/{device}/still"
     motion_topic = f"{args.prefix}sensor/{device}/state"
 
-    # cmd_topic is only set when a specific hostname is known (can't publish to wildcard)
-    cmd_topic = f"{args.prefix}sensor/{args.hostname}/cmd" if args.hostname else ""
-
     userdata = {
         "image_topic":  image_topic,
         "motion_topic": motion_topic,
-        "cmd_topic":    cmd_topic,
         "prefix":       args.prefix,
         "out_dir":      args.outdir,
     }
@@ -136,6 +144,8 @@ def main():
         client = mqtt.Client(userdata=userdata)
     client.on_connect = on_connect
     client.on_message = on_message
+    if hasattr(client, "on_callback_exception"):
+        client.on_callback_exception = on_callback_exception
 
     if args.user:
         client.username_pw_set(args.user, args.password)

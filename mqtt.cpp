@@ -125,15 +125,14 @@ static void mqtt_error_handler(void *handler_args, esp_event_base_t base, int32_
     mqttConnected = false;
   }
 }
-static volatile bool pendingFramePublish = false;
-
 void mqttPublishFrame() {
-  // Signal the MQTT task to publish alertBuffer. Must NOT call esp_mqtt_client_publish
-  // here because this runs on the capture task whose stack is too small for a large JPEG.
-  if (!mqtt_active || !mqttConnected) return;
+  // Publish the frame already captured in alertBuffer directly from the capture task.
+  // Unlike sendMqttImage() this does NOT use the doKeepFrame wait loop, so it is safe
+  // to call from within processFrame() without risking a deadlock.
+  if (!mqtt_client || !mqttConnected) return;
   if (!alertBuffer || !alertBufferSize) return;
-  pendingFramePublish = true;
-  if (mqttTaskHandle) xTaskNotifyGive(mqttTaskHandle);
+  esp_mqtt_client_publish(mqtt_client, image_topic, (const char*)alertBuffer, alertBufferSize, MQTT_QOS, 0);
+  LOG_VRB("mqttPublishFrame: sent %lu bytes to %s", alertBufferSize, image_topic);
 }
 
 void sendMqttImage(){
@@ -212,15 +211,6 @@ static void mqttTask(void* parameter) {
     if (mqttConnected) {
       //Check if server sends a remote command
       checkForRemoteQuery();
-      // Publish motion-triggered frame if one is waiting
-      if (pendingFramePublish) {
-        pendingFramePublish = false;
-        if (alertBuffer && alertBufferSize && strlen(image_topic)) {
-          LOG_INF("mqttTask: publishing frame %lu bytes -> %s", alertBufferSize, image_topic);
-          int id = esp_mqtt_client_publish(mqtt_client, image_topic, (const char*)alertBuffer, alertBufferSize, 0, 0);
-          if (id < 0) LOG_WRN("mqttTask: frame publish failed (id=%d)", id);
-        }
-      }
       if (mqttTaskDelay > 0 ) vTaskDelay(mqttTaskDelay / portTICK_RATE_MS);
     } else { //Disconnected      
       LOG_WRN("Disconnected, wait..");
