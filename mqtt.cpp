@@ -125,6 +125,16 @@ static void mqtt_error_handler(void *handler_args, esp_event_base_t base, int32_
     mqttConnected = false;
   }
 }
+void mqttPublishFrame() {
+  // Publish the frame already captured in alertBuffer directly from the capture task.
+  // Unlike sendMqttImage() this does NOT use the doKeepFrame wait loop, so it is safe
+  // to call from within processFrame() without risking a deadlock.
+  if (!mqtt_client || !mqttConnected) return;
+  if (!alertBuffer || !alertBufferSize) return;
+  esp_mqtt_client_publish(mqtt_client, image_topic, (const char*)alertBuffer, alertBufferSize, MQTT_QOS, 0);
+  LOG_VRB("mqttPublishFrame: sent %lu bytes to %s", alertBufferSize, image_topic);
+}
+
 void sendMqttImage(){
   uint32_t startTime = millis();
   if (!strlen(mqtt_topic_prefix)) return;

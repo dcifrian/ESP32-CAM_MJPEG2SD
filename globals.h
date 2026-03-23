@@ -227,6 +227,7 @@ void startMqttClient();
 void stopMqttClient();  
 void mqttPublish(const char* payload);
 void mqttPublishPath(const char* suffix, const char* payload, const char *device = "sensor");
+void mqttPublishFrame();
 // telegram.cpp
 bool getTgramUpdate(char* response);
 bool sendTgramMessage(const char* info, const char* item, const char* parseMode);
