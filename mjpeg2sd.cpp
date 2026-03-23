@@ -475,13 +475,13 @@ static boolean processFrame() {
     }
 #endif
     wsAsyncSendJson("ustatus", "\"showRecord\":1");
-    openAvi();
+    if (doRecording) openAvi();
   }
 
   if (isCapturing) {
     // capture is ongoing
     showProgress();
-    if (frameCnt < frameLimit) {
+    if (doRecording && frameCnt < frameLimit) {
       dTimeTot += millis() - dTime;
       saveFrame(fb);
       if (frameCnt == frameLimit) {
@@ -501,7 +501,7 @@ static boolean processFrame() {
   esp_camera_fb_return(fb);
   if (!isCapturing && prevCapture) {
     // finish recording (normal or forced)
-    closeAvi();
+    if (doRecording) closeAvi();
     wsAsyncSendJson("ustatus", "\"showRecord\":0");
     stopPlayback = false; // allow for playbacks
   }
@@ -771,7 +771,6 @@ bool prepRecording() {
     sdMinCardFreeSpace = 0;
     doRecording = false;
     sdLog = false;
-    useMotion = false;
     LOG_WRN("Recording disabled as no SD card");
   } else {
     LOG_INF("To record new AVI, do one of:");
