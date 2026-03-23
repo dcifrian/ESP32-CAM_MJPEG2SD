@@ -120,6 +120,13 @@ def record_video(camera_ip, out_dir, stop_event, max_duration):
 
     try:
         resp = requests.get(url, stream=True, timeout=HTTP_TIMEOUT)
+        if resp.status_code != 200:
+            print(f"[!] Stream rejected: HTTP {resp.status_code}  ({url})")
+            return
+        ct = resp.headers.get("Content-Type", "")
+        if "multipart" not in ct:
+            print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
+            return
         for jpg in _parse_mjpeg_frames(resp):
             if stop_event.is_set() or (time.time() - t0) >= max_duration:
                 break
