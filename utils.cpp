@@ -348,7 +348,7 @@ static bool startWifi(bool firstcall = true) {
           setWifiSTA();
         }
         uint32_t startAttemptTime = millis();
-        while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 15000) {
+        while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 30000) {
           logPrint(".");
           delay(500);
         }
