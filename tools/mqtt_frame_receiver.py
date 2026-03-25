@@ -122,8 +122,10 @@ def _parse_mjpeg_frames(resp):
 def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
     """Stream MJPEG from /sustain?stream=1 and write to a video file.
 
-    Reconnects automatically if the stream stalls, and can be interrupted
-    immediately via stop_event (the main thread closes the response socket).
+    The recording deadline is based on the *last* motion "on" event stored in
+    userdata["last_motion_time"], so every new motion event extends the window
+    by max_duration seconds from that moment.  "off" events are ignored here.
+    Reconnects automatically if the stream stalls.
     """
     try:
         import cv2
@@ -135,15 +137,19 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
     url = f"http://{camera_ip}/sustain?stream=1"
     ts = time.strftime("%Y%m%d_%H%M%S")
     filename = os.path.join(out_dir, f"video_{ts}.avi")
-    print(f"[*] Recording video → {filename}  (timeout {max_duration}s)")
+    print(f"[*] Recording video → {filename}  (idle-stop after {max_duration}s of no motion)")
 
     writer = None
     frame_count = 0
     t0 = time.time()
     last_report = t0
 
+    def deadline_reached():
+        last = userdata.get("last_motion_time") or t0
+        return time.time() - last >= max_duration
+
     try:
-        while not stop_event.is_set() and (time.time() - t0) < max_duration:
+        while not stop_event.is_set() and not deadline_reached():
             resp = None
             try:
                 resp = requests.get(url, stream=True, timeout=(HTTP_TIMEOUT, 10))
@@ -156,7 +162,7 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                     print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
                     break
                 for jpg in _parse_mjpeg_frames(resp):
-                    if stop_event.is_set() or (time.time() - t0) >= max_duration:
+                    if stop_event.is_set() or deadline_reached():
                         break
                     arr = np.frombuffer(jpg, dtype=np.uint8)
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -172,19 +178,23 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                     frame_count += 1
                     now = time.time()
                     if now - last_report >= 5:
+                        last = userdata.get("last_motion_time") or t0
+                        remaining = max(0, max_duration - (now - last))
                         fps = frame_count / (now - t0)
-                        print(f"[*] {frame_count} frames in {now - t0:.0f}s ({fps:.1f} fps)", flush=True)
+                        print(f"[*] {frame_count} frames  {fps:.1f} fps  deadline in {remaining:.0f}s", flush=True)
                         last_report = now
             except requests.exceptions.ReadTimeout:
-                if not stop_event.is_set():
-                    print(f"[*] Stream stalled at {frame_count} frames, reconnecting...", flush=True)
-                    time.sleep(0.5)
-                    continue
+                if stop_event.is_set() or deadline_reached():
+                    break
+                print(f"[*] Stream stalled at {frame_count} frames, reconnecting...", flush=True)
+                time.sleep(0.5)
+                continue
             except Exception as e:
-                if not stop_event.is_set():
-                    print(f"[!] Stream error: {e}", flush=True)
-                    time.sleep(0.5)
-                    continue
+                if stop_event.is_set() or deadline_reached():
+                    break
+                print(f"[!] Stream error: {e}", flush=True)
+                time.sleep(0.5)
+                continue
             finally:
                 userdata["current_response"] = None
                 if resp is not None:
@@ -192,8 +202,8 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                         resp.close()
                     except Exception:
                         pass
-            # Stream ended cleanly (ESP closed it); small pause before retry
-            if not stop_event.is_set() and (time.time() - t0) < max_duration:
+            # Stream ended cleanly; small pause before retry
+            if not stop_event.is_set() and not deadline_reached():
                 time.sleep(0.2)
     except Exception:
         print("[!] Error during video recording:", file=sys.stderr)
@@ -239,7 +249,8 @@ def on_message(client, userdata, msg):
 
         if payload.lower() == "on":
             if userdata["video_mode"]:
-                # Start a new recording only if one isn't already running
+                # Always update the deadline on every motion event
+                userdata["last_motion_time"] = time.time()
                 if userdata["recording_thread"] is None or not userdata["recording_thread"].is_alive():
                     stop_event = threading.Event()
                     userdata["stop_event"] = stop_event
@@ -257,7 +268,7 @@ def on_message(client, userdata, msg):
                     userdata["recording_thread"] = t
                     t.start()
                 else:
-                    print("[*] Motion detected but recording already in progress — skipping")
+                    print(f"[*] Motion extended recording deadline (+{userdata['video_timeout']}s)")
             else:
                 # Image mode: pull a single frame in a background thread
                 threading.Thread(
@@ -267,17 +278,9 @@ def on_message(client, userdata, msg):
                 ).start()
 
         elif payload.lower() == "off":
-            if userdata["video_mode"]:
-                stop_event = userdata.get("stop_event")
-                if stop_event:
-                    stop_event.set()
-                # Close the active stream socket so iter_content unblocks immediately
-                resp = userdata.get("current_response")
-                if resp is not None:
-                    try:
-                        resp.close()
-                    except Exception:
-                        pass
+            # In video mode "off" is informational — the recording runs until
+            # max_duration seconds pass with no new "on" event.
+            pass
 
     except Exception:
         print("[!] Exception in on_message:", file=sys.stderr)
@@ -309,6 +312,7 @@ def main():
         "recording_thread":  None,
         "stop_event":        None,
         "current_response":  None,
+        "last_motion_time":  None,   # updated on every "on" event; drives the deadline
     }
 
     if hasattr(mqtt, "CallbackAPIVersion"):
