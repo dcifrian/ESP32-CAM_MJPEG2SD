@@ -337,13 +337,21 @@ static bool startWifi(bool firstcall = true) {
   if (netMode == 0) {
     // connect to Wifi station
     setWifiSTA();
-    uint32_t startAttemptTime = millis();
     // Stop trying on failure timeout, will try to reconnect later by ping
     wlStat = WL_NO_SSID_AVAIL;
     if (strlen(ST_SSID)) {
-      while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 15000)  {
-        logPrint(".");
-        delay(500);
+      for (int attempt = 1; attempt <= 5 && wlStat != WL_CONNECTED; attempt++) {
+        if (attempt > 1) {
+          LOG_WRN("WiFi connect attempt %d/5, retrying ...", attempt);
+          WiFi.STA.disconnect();
+          delay(500);
+          setWifiSTA();
+        }
+        uint32_t startAttemptTime = millis();
+        while (wlStat = WiFi.STA.status(), wlStat != WL_CONNECTED && millis() - startAttemptTime < 15000) {
+          logPrint(".");
+          delay(500);
+        }
       }
     }
     // show stats of requested SSID
