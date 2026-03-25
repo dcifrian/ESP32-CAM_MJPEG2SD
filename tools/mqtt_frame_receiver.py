@@ -86,22 +86,37 @@ def fetch_frame(camera_ip, out_dir):
 # ---------------------------------------------------------------------------
 
 def _parse_mjpeg_frames(resp):
-    """Yield raw JPEG bytes from an MJPEG multipart streaming response."""
+    """Yield raw JPEG bytes from an MJPEG multipart response using Content-Length.
+
+    Reads exactly as many bytes as the ESP says each frame contains, so the
+    parser can never get confused by partial sends or coincidental marker bytes.
+    """
     buf = b""
-    chunk_count = 0
-    for chunk in resp.iter_content(chunk_size=1024):
-        chunk_count += 1
-        if chunk_count <= 3:
-            print(f"[dbg] chunk {chunk_count}: {len(chunk)} bytes, starts with {chunk[:40]!r}", flush=True)
+    for chunk in resp.iter_content(chunk_size=8192):
         buf += chunk
-        # Scan for complete JPEG frames by start/end markers
         while True:
-            s = buf.find(b"\xff\xd8\xff")   # JPEG SOI
-            e = buf.find(b"\xff\xd9")        # JPEG EOI
-            if s < 0 or e < 0 or e <= s:
+            # Locate the Content-Length header for the next part
+            cl_idx = buf.find(b"Content-Length:")
+            if cl_idx < 0:
                 break
-            yield buf[s : e + 2]
-            buf = buf[e + 2 :]
+            eol = buf.find(b"\r\n", cl_idx)
+            if eol < 0:
+                break
+            try:
+                frame_len = int(buf[cl_idx + 15 : eol].strip())
+            except ValueError:
+                buf = buf[cl_idx + 15:]   # skip malformed header, keep searching
+                continue
+            # Find end of part headers (blank line)
+            hdr_end = buf.find(b"\r\n\r\n", cl_idx)
+            if hdr_end < 0:
+                break
+            data_start = hdr_end + 4
+            data_end   = data_start + frame_len
+            if len(buf) < data_end:
+                break   # wait for the rest of the frame to arrive
+            yield buf[data_start : data_end]
+            buf = buf[data_end:]
 
 
 def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
@@ -131,7 +146,7 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
         while not stop_event.is_set() and (time.time() - t0) < max_duration:
             resp = None
             try:
-                resp = requests.get(url, stream=True, timeout=(HTTP_TIMEOUT, 5))
+                resp = requests.get(url, stream=True, timeout=(HTTP_TIMEOUT, 10))
                 userdata["current_response"] = resp
                 if resp.status_code != 200:
                     print(f"[!] Stream rejected: HTTP {resp.status_code}  ({url})")
@@ -140,18 +155,16 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                 if "multipart" not in ct:
                     print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
                     break
-                print(f"[dbg] stream connected (frame_count so far: {frame_count})", flush=True)
                 for jpg in _parse_mjpeg_frames(resp):
                     if stop_event.is_set() or (time.time() - t0) >= max_duration:
                         break
                     arr = np.frombuffer(jpg, dtype=np.uint8)
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if frame is None:
-                        print(f"[dbg] cv2.imdecode failed on {len(jpg)}-byte chunk", flush=True)
                         continue
                     if writer is None:
                         h, w = frame.shape[:2]
-                        print(f"[dbg] first frame decoded: {w}x{h}", flush=True)
+                        print(f"[*] Stream: {w}x{h}", flush=True)
                         writer = cv2.VideoWriter(
                             filename, cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (w, h)
                         )
@@ -159,11 +172,12 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                     frame_count += 1
                     now = time.time()
                     if now - last_report >= 5:
-                        print(f"[dbg] {frame_count} frames in {now - t0:.0f}s", flush=True)
+                        fps = frame_count / (now - t0)
+                        print(f"[*] {frame_count} frames in {now - t0:.0f}s ({fps:.1f} fps)", flush=True)
                         last_report = now
             except requests.exceptions.ReadTimeout:
                 if not stop_event.is_set():
-                    print(f"[*] Stream read timeout after {frame_count} frames, reconnecting...", flush=True)
+                    print(f"[*] Stream stalled at {frame_count} frames, reconnecting...", flush=True)
                     time.sleep(0.5)
                     continue
             except Exception as e:
@@ -178,7 +192,7 @@ def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
                         resp.close()
                     except Exception:
                         pass
-            # Stream ended (ESP closed it or stop_event fired); small pause before retry
+            # Stream ended cleanly (ESP closed it); small pause before retry
             if not stop_event.is_set() and (time.time() - t0) < max_duration:
                 time.sleep(0.2)
     except Exception:
