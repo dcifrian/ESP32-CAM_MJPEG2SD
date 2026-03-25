@@ -465,7 +465,7 @@ static boolean processFrame() {
   if (isCapturing && !prevCapture) {
     // new movement has occurred or record button pressed, start recording
     stopPlaying(); // terminate any playback
-    if (doRecording) stopPlayback = true; // only block streaming if recording to SD
+    stopPlayback = true; // stop any subsequent playback
     if (!dashCamOn) LOG_ALT("Capture started by %s%s%s%s", reasonId == 0 ? "Button" : "", reasonId == 1 ? "Camera " : "", reasonId == 2 ? "PIR" : "", reasonId == 3 ? "Accelerometer" : "");
 #if INCLUDE_MQTT
     if (mqtt_active) {
@@ -503,7 +503,7 @@ static boolean processFrame() {
     // finish recording (normal or forced)
     if (doRecording) closeAvi();
     wsAsyncSendJson("ustatus", "\"showRecord\":0");
-    if (doRecording) stopPlayback = false; // allow for playbacks
+    stopPlayback = false; // allow for playbacks
   }
   return res;
 }

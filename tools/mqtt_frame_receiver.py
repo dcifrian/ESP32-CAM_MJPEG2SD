@@ -88,7 +88,13 @@ def fetch_frame(camera_ip, out_dir):
 def _parse_mjpeg_frames(resp):
     """Yield raw JPEG bytes from an MJPEG multipart streaming response."""
     buf = b""
+    total_bytes = 0
+    first_chunk = True
     for chunk in resp.iter_content(chunk_size=4096):
+        if first_chunk:
+            print(f"[dbg] first chunk: {len(chunk)} bytes, starts with {chunk[:80]!r}", flush=True)
+            first_chunk = False
+        total_bytes += len(chunk)
         buf += chunk
         # Scan for complete JPEG frames by start/end markers
         while True:
@@ -127,20 +133,27 @@ def record_video(camera_ip, out_dir, stop_event, max_duration):
         if "multipart" not in ct:
             print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
             return
+        last_report = t0
         for jpg in _parse_mjpeg_frames(resp):
             if stop_event.is_set() or (time.time() - t0) >= max_duration:
                 break
             arr = np.frombuffer(jpg, dtype=np.uint8)
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame is None:
+                print(f"[dbg] cv2.imdecode failed on {len(jpg)}-byte chunk", flush=True)
                 continue
             if writer is None:
                 h, w = frame.shape[:2]
+                print(f"[dbg] first frame decoded: {w}x{h}", flush=True)
                 writer = cv2.VideoWriter(
                     filename, cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (w, h)
                 )
             writer.write(frame)
             frame_count += 1
+            now = time.time()
+            if now - last_report >= 5:
+                print(f"[dbg] {frame_count} frames in {now - t0:.0f}s", flush=True)
+                last_report = now
     except Exception:
         print("[!] Error during video recording:", file=sys.stderr)
         traceback.print_exc()
