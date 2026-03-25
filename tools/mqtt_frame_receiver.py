@@ -109,7 +109,7 @@ def record_video(camera_ip, out_dir, stop_event, max_duration):
         print("[!] opencv-python is required for video mode.  Run: pip install opencv-python", file=sys.stderr)
         return
 
-    url = f"http://{camera_ip}/sustain?video=1"
+    url = f"http://{camera_ip}/sustain?stream=1"
     ts = time.strftime("%Y%m%d_%H%M%S")
     filename = os.path.join(out_dir, f"video_{ts}.avi")
     print(f"[*] Recording video → {filename}  (timeout {max_duration}s)")
