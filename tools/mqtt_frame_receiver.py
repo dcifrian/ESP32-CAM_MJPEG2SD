@@ -88,13 +88,11 @@ def fetch_frame(camera_ip, out_dir):
 def _parse_mjpeg_frames(resp):
     """Yield raw JPEG bytes from an MJPEG multipart streaming response."""
     buf = b""
-    total_bytes = 0
-    first_chunk = True
-    for chunk in resp.iter_content(chunk_size=4096):
-        if first_chunk:
-            print(f"[dbg] first chunk: {len(chunk)} bytes, starts with {chunk[:80]!r}", flush=True)
-            first_chunk = False
-        total_bytes += len(chunk)
+    chunk_count = 0
+    for chunk in resp.iter_content(chunk_size=1024):
+        chunk_count += 1
+        if chunk_count <= 3:
+            print(f"[dbg] chunk {chunk_count}: {len(chunk)} bytes, starts with {chunk[:40]!r}", flush=True)
         buf += chunk
         # Scan for complete JPEG frames by start/end markers
         while True:
@@ -106,8 +104,12 @@ def _parse_mjpeg_frames(resp):
             buf = buf[e + 2 :]
 
 
-def record_video(camera_ip, out_dir, stop_event, max_duration):
-    """Stream MJPEG from /sustain?video=1 and write to a video file."""
+def record_video(camera_ip, out_dir, stop_event, max_duration, userdata):
+    """Stream MJPEG from /sustain?stream=1 and write to a video file.
+
+    Reconnects automatically if the stream stalls, and can be interrupted
+    immediately via stop_event (the main thread closes the response socket).
+    """
     try:
         import cv2
         import numpy as np
@@ -123,37 +125,62 @@ def record_video(camera_ip, out_dir, stop_event, max_duration):
     writer = None
     frame_count = 0
     t0 = time.time()
+    last_report = t0
 
     try:
-        resp = requests.get(url, stream=True, timeout=HTTP_TIMEOUT)
-        if resp.status_code != 200:
-            print(f"[!] Stream rejected: HTTP {resp.status_code}  ({url})")
-            return
-        ct = resp.headers.get("Content-Type", "")
-        if "multipart" not in ct:
-            print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
-            return
-        last_report = t0
-        for jpg in _parse_mjpeg_frames(resp):
-            if stop_event.is_set() or (time.time() - t0) >= max_duration:
-                break
-            arr = np.frombuffer(jpg, dtype=np.uint8)
-            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if frame is None:
-                print(f"[dbg] cv2.imdecode failed on {len(jpg)}-byte chunk", flush=True)
-                continue
-            if writer is None:
-                h, w = frame.shape[:2]
-                print(f"[dbg] first frame decoded: {w}x{h}", flush=True)
-                writer = cv2.VideoWriter(
-                    filename, cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (w, h)
-                )
-            writer.write(frame)
-            frame_count += 1
-            now = time.time()
-            if now - last_report >= 5:
-                print(f"[dbg] {frame_count} frames in {now - t0:.0f}s", flush=True)
-                last_report = now
+        while not stop_event.is_set() and (time.time() - t0) < max_duration:
+            resp = None
+            try:
+                resp = requests.get(url, stream=True, timeout=(HTTP_TIMEOUT, 5))
+                userdata["current_response"] = resp
+                if resp.status_code != 200:
+                    print(f"[!] Stream rejected: HTTP {resp.status_code}  ({url})")
+                    break
+                ct = resp.headers.get("Content-Type", "")
+                if "multipart" not in ct:
+                    print(f"[!] Unexpected Content-Type: {ct!r}  ({url})")
+                    break
+                print(f"[dbg] stream connected (frame_count so far: {frame_count})", flush=True)
+                for jpg in _parse_mjpeg_frames(resp):
+                    if stop_event.is_set() or (time.time() - t0) >= max_duration:
+                        break
+                    arr = np.frombuffer(jpg, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is None:
+                        print(f"[dbg] cv2.imdecode failed on {len(jpg)}-byte chunk", flush=True)
+                        continue
+                    if writer is None:
+                        h, w = frame.shape[:2]
+                        print(f"[dbg] first frame decoded: {w}x{h}", flush=True)
+                        writer = cv2.VideoWriter(
+                            filename, cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (w, h)
+                        )
+                    writer.write(frame)
+                    frame_count += 1
+                    now = time.time()
+                    if now - last_report >= 5:
+                        print(f"[dbg] {frame_count} frames in {now - t0:.0f}s", flush=True)
+                        last_report = now
+            except requests.exceptions.ReadTimeout:
+                if not stop_event.is_set():
+                    print(f"[*] Stream read timeout after {frame_count} frames, reconnecting...", flush=True)
+                    time.sleep(0.5)
+                    continue
+            except Exception as e:
+                if not stop_event.is_set():
+                    print(f"[!] Stream error: {e}", flush=True)
+                    time.sleep(0.5)
+                    continue
+            finally:
+                userdata["current_response"] = None
+                if resp is not None:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+            # Stream ended (ESP closed it or stop_event fired); small pause before retry
+            if not stop_event.is_set() and (time.time() - t0) < max_duration:
+                time.sleep(0.2)
     except Exception:
         print("[!] Error during video recording:", file=sys.stderr)
         traceback.print_exc()
@@ -209,6 +236,7 @@ def on_message(client, userdata, msg):
                             userdata["out_dir"],
                             stop_event,
                             userdata["video_timeout"],
+                            userdata,
                         ),
                         daemon=True,
                     )
@@ -229,6 +257,13 @@ def on_message(client, userdata, msg):
                 stop_event = userdata.get("stop_event")
                 if stop_event:
                     stop_event.set()
+                # Close the active stream socket so iter_content unblocks immediately
+                resp = userdata.get("current_response")
+                if resp is not None:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
 
     except Exception:
         print("[!] Exception in on_message:", file=sys.stderr)
@@ -259,6 +294,7 @@ def main():
         "video_timeout":     args.video_timeout,
         "recording_thread":  None,
         "stop_event":        None,
+        "current_response":  None,
     }
 
     if hasattr(mqtt, "CallbackAPIVersion"):
@@ -275,7 +311,7 @@ def main():
         client.username_pw_set(args.user, args.password)
 
     print(f"[*] Connecting to MQTT broker at {args.broker}:{args.port} ...")
-    print(f"[*] Fetching from http://{args.camera}/{'sustain?video=1' if args.video else 'control?still=1'}")
+    print(f"[*] Fetching from http://{args.camera}/{'sustain?stream=1' if args.video else 'control?still=1'}")
     if args.video:
         print(f"[*] Video timeout: {args.video_timeout}s")
     client.connect(args.broker, args.port, keepalive=60)
