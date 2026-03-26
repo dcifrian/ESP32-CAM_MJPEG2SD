@@ -344,22 +344,36 @@ int readLDR() {
   return currentLdrVal;
 }
 
+// Perform one differential LDR measurement and publish result via MQTT.
+// Safe to call from any task or from checkForRemoteQuery().
+void takeLdrReading() {
+  if (!ldrUse || ldrPin <= 0) {
+    LOG_WRN("LDR not configured");
+    return;
+  }
+  int ambient = smoothAnalog(ldrPin);
+  int illuminated = ambient;
+  if (ldrLedPin > 0) {
+    digitalWrite(ldrLedPin, HIGH);
+    delay(20);
+    illuminated = smoothAnalog(ldrPin);
+    digitalWrite(ldrLedPin, LOW);
+  }
+  int differential = max(0, illuminated - ambient);
+  currentLdrVal = differential;
+  int percent = differential * 100 / MAX_ADC;
+  LOG_INF("LDR: ambient=%d illuminated=%d differential=%d (%d%%)", ambient, illuminated, differential, percent);
+  char payload[80];
+  snprintf(payload, sizeof(payload),
+    "{\"ambient\":%d,\"illuminated\":%d,\"differential\":%d,\"percent\":%d}",
+    ambient, illuminated, differential, percent);
+  mqttPublishPath("ldr", payload);
+}
+
 static void ldrTask(void* parameter) {
   if (ldrInterval < 1) ldrInterval = 1;
   while (true) {
-    // read ambient level first (LED off)
-    int ambient = smoothAnalog(ldrPin);
-    if (ldrLedPin > 0) {
-      // turn on illumination LED, wait for LDR to settle, read, turn off
-      digitalWrite(ldrLedPin, HIGH);
-      delay(20); // ~20ms settle time for LDR response
-      int illuminated = smoothAnalog(ldrPin);
-      digitalWrite(ldrLedPin, LOW);
-      // differential: eliminate ambient contribution
-      currentLdrVal = max(0, illuminated - ambient);
-    } else {
-      currentLdrVal = ambient;
-    }
+    takeLdrReading();
     delay(ldrInterval * 1000);
   }
   vTaskDelete(NULL);

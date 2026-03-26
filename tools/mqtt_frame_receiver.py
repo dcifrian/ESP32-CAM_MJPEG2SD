@@ -7,6 +7,13 @@ Listens for motion events over MQTT, then either:
   - (--video)  records a video from the MJPEG stream at /sustain?video=1,
                stopping when motion ends or --video-timeout seconds elapse.
 
+Also supports LDR (light sensor) readings for cat feeder food-level tracking:
+  - Subscribes to {prefix}sensor/{hostname}/ldr and logs readings
+  - Use --ldr-trigger to request a reading on startup
+  - Use --hostname to target a specific device when sending commands
+
+LDR JSON payload: {"ambient": N, "illuminated": N, "differential": N, "percent": N}
+
 Usage:
     pip install paho-mqtt requests
     pip install opencv-python       # only needed for --video mode
@@ -17,9 +24,14 @@ Usage:
     # Video mode:
     python3 mqtt_frame_receiver.py --broker 192.168.1.x --camera 192.168.1.y \\
         --video [--video-timeout 300]
+
+    # Trigger an LDR reading on connect (requires --hostname):
+    python3 mqtt_frame_receiver.py --broker 192.168.1.x --camera 192.168.1.y \\
+        --hostname esp32cam --ldr-trigger
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -51,6 +63,8 @@ def parse_args():
     p.add_argument("--video",          action="store_true",            help="Record video instead of capturing a single frame")
     p.add_argument("--video-timeout",  default=DEFAULT_VIDEO_TIMEOUT, type=int, metavar="SECONDS",
                    help=f"Stop recording after this many seconds even if motion continues (default {DEFAULT_VIDEO_TIMEOUT})")
+    p.add_argument("--ldr-trigger",    action="store_true",
+                   help="Send an LDR measurement command to the ESP32 immediately on connect (requires --hostname)")
     return p.parse_args()
 
 
@@ -234,9 +248,15 @@ def hostname_from_topic(topic):
 def on_connect(client, userdata, flags, rc, *args):
     if rc == 0:
         motion_topic = userdata["motion_topic"]
-        result = client.subscribe(motion_topic)
+        ldr_topic    = userdata["ldr_topic"]
+        client.subscribe(motion_topic)
+        client.subscribe(ldr_topic)
         mode = "video" if userdata["video_mode"] else "image"
-        print(f"[+] Connected ({mode} mode). Subscribed to {motion_topic}  result={result}")
+        print(f"[+] Connected ({mode} mode). Subscribed to {motion_topic}")
+        print(f"[+] Subscribed to LDR topic: {ldr_topic}")
+        if userdata.get("ldr_trigger") and userdata.get("cmd_topic"):
+            client.publish(userdata["cmd_topic"], "ldr")
+            print(f"[*] LDR trigger sent → {userdata['cmd_topic']}")
     else:
         print(f"[!] Connection failed, rc={rc}")
 
@@ -245,6 +265,21 @@ def on_message(client, userdata, msg):
     try:
         hostname = hostname_from_topic(msg.topic)
         payload  = msg.payload.decode("utf-8", errors="replace").strip()
+
+        # LDR reading
+        if msg.topic == userdata["ldr_topic"] or msg.topic.endswith("/ldr"):
+            try:
+                data = json.loads(payload)
+                ambient      = data.get("ambient", "?")
+                illuminated  = data.get("illuminated", "?")
+                differential = data.get("differential", "?")
+                percent      = data.get("percent", "?")
+                print(f"[ldr/{hostname}] ambient={ambient} illuminated={illuminated} "
+                      f"differential={differential} ({percent}%)")
+            except json.JSONDecodeError:
+                print(f"[ldr/{hostname}] {payload}")
+            return
+
         print(f"[motion/{hostname}] {payload}")
 
         if payload.lower() == "on":
@@ -302,9 +337,19 @@ def main():
 
     device       = args.hostname if args.hostname else "+"
     motion_topic = f"{args.prefix}sensor/{device}/motion"
+    ldr_topic    = f"{args.prefix}sensor/{device}/ldr"
+    # cmd_topic requires a specific hostname (not wildcard)
+    cmd_topic    = f"{args.prefix}sensor/{args.hostname}/cmd" if args.hostname else None
+
+    if args.ldr_trigger and not args.hostname:
+        print("[!] --ldr-trigger requires --hostname to target a specific device", file=sys.stderr)
+        sys.exit(1)
 
     userdata = {
         "motion_topic":      motion_topic,
+        "ldr_topic":         ldr_topic,
+        "cmd_topic":         cmd_topic,
+        "ldr_trigger":       args.ldr_trigger,
         "camera_ip":         args.camera,
         "out_dir":           args.outdir,
         "video_mode":        args.video,
@@ -332,6 +377,8 @@ def main():
     print(f"[*] Fetching from http://{args.camera}/{'sustain?stream=1' if args.video else 'control?still=1'}")
     if args.video:
         print(f"[*] Video timeout: {args.video_timeout}s")
+    if args.ldr_trigger:
+        print(f"[*] LDR trigger on connect → {cmd_topic}")
     client.connect(args.broker, args.port, keepalive=60)
 
     try:

@@ -60,7 +60,7 @@
 #define INCLUDE_FTP_HFS false // ftp.cpp (file upload)
 #define INCLUDE_TGRAM false   // telegram.cpp (Telegram app interface)
 #define INCLUDE_AUDIO false   // audio.cpp (microphones & speakers)
-#define INCLUDE_PERIPH false  // peripherals.cpp (servos, PIR, led etc)
+#define INCLUDE_PERIPH true   // peripherals.cpp (servos, PIR, led etc)
 #define INCLUDE_SMTP false    // smtp.cpp (email)
 #define INCLUDE_MQTT true     // mqtt.cpp (MQTT)
 #define INCLUDE_HASIO false   // mqtt.cpp (Send home assistant discovery messages). Needs INCLUDE_MQTT true
@@ -438,6 +438,7 @@ extern bool ldrUse;    // true to enable LDR monitoring
 extern int ldrPin;     // ADC pin connected to LDR (recommended: GPIO1 = ADC1_CH0)
 extern int ldrLedPin;  // pin for illumination LED; -1 if unused
 extern int ldrInterval; // seconds between readings
+void takeLdrReading();  // one-shot differential measurement + MQTT publish
 
 // audio
 extern bool AudActive;

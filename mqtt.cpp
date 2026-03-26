@@ -167,8 +167,14 @@ void checkForRemoteQuery() {
       } else { //No params command
         LOG_VRB("Execute cmd: %s", query);
         if (!strcmp(query, "reset")) { //Reboot
-            doRestart("Mqtt remote restart");  
-        }else if (!strcmp(query, "status")) {
+            doRestart("Mqtt remote restart");
+        } else if (!strcmp(query, "ldr")) {
+#if INCLUDE_PERIPH
+          takeLdrReading();
+#else
+          LOG_WRN("INCLUDE_PERIPH not enabled");
+#endif
+        } else if (!strcmp(query, "status")) {
           buildJsonString(false);
           mqttPublishPath("status", jsonBuff);
         } else if (!strcmp(query, "status?q")) {
