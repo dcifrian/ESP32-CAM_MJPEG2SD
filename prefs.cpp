@@ -242,7 +242,9 @@ void updateStatus(const char* variable, const char* _value, bool fromUser) {
   char value[IN_FILE_NAME_LEN];
   strncpy(value, _value, sizeof(value));  
 #if INCLUDE_MQTT
-  if (mqtt_active) {
+  // Only publish user-initiated changes (not startup config loading),
+  // and never publish password fields.
+  if (mqtt_active && fromUser && strstr(variable, "_Pass") == NULL) {
     char buff[(IN_FILE_NAME_LEN * 2)];
     snprintf(buff, IN_FILE_NAME_LEN * 2, "%s=%s", variable, value);
     mqttPublishPath("state", buff);

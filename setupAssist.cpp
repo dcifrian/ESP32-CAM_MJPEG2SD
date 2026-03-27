@@ -300,6 +300,17 @@ const char* failPageS_html = R"~(
         .then(logdata => { document.getElementById('appLog').innerText = logdata;})
         .catch(error => alert('Error fetching log:', error));
       }
+      function applyCfg() {
+        var k = document.getElementById('cfgKey').value.trim();
+        var v = document.getElementById('cfgVal').value.trim();
+        if (!k) { alert('Enter a config key'); return; }
+        fetch('/control?' + encodeURIComponent(k) + '=' + encodeURIComponent(v))
+          .then(() => { document.getElementById('cfgStatus').innerText = 'Applied ' + k + '=' + v + '. Click Save to persist.'; });
+      }
+      function saveCfg() {
+        fetch('/control?save=1')
+          .then(() => { document.getElementById('cfgStatus').innerText = 'Saved to flash. Reboot to apply.'; });
+      }
     </script>
   </head>
   <body>
@@ -309,6 +320,14 @@ const char* failPageS_html = R"~(
 const char* failPageE_html = R"~(
     </h2>
     <h3><a href="#" onclick="getLog(); return false;"><button class=styled-button>Check log</button></a></h3>
+    <h3>
+      Fix config:
+      <input type="text" id="cfgKey" placeholder="key (e.g. xclkMhz)" style="width:160px">
+      <input type="text" id="cfgVal" placeholder="value (e.g. 20)" style="width:100px">
+      <button onclick="applyCfg()">Apply</button>
+      <button onclick="saveCfg()">Save to flash</button>
+      <span id="cfgStatus" style="margin-left:10px;color:green"></span>
+    </h3>
     <h3><a href=/control?reset=1><button class=styled-button>Reboot ESP after fix</button></a></h3>
     <h3><a href=/web?OTA.htm><button class=styled-button>OTA Update</button></a></h3>
     <div id="appLog"></div>
