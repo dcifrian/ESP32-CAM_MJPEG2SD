@@ -56,8 +56,6 @@ DEFAULT_TOPIC_PREFIX  = "homeassistant/"
 DEFAULT_OUTPUT_DIR    = "./motion_frames"
 DEFAULT_VIDEO_TIMEOUT = 300   # seconds
 HTTP_TIMEOUT          = 5     # seconds for still-image requests
-FETCH_RETRIES         = 3     # attempts before giving up on a still frame
-FETCH_RETRY_DELAY     = 2     # seconds between fetch attempts
 YOLO_QUEUE_MAXSIZE    = 100   # drop items rather than grow unbounded
 # ---------------------------------------------------------------------------
 
@@ -318,55 +316,51 @@ def _yolo_video(model, video_path, out_dir, conf, target_classes, save_discarded
 # ---------------------------------------------------------------------------
 
 def fetch_frame(camera_ip, out_dir, yolo_queue=None):
-    """Fetch a single JPEG from /control?still=1 with retry on WiFi failures.
+    """Fetch a single JPEG from /control?still=1 (one attempt only).
 
     With yolo_queue: bytes are queued for YOLO filtering (raw file not saved).
     Without yolo_queue: frame saved immediately as motion_TIMESTAMP.jpg.
+    Failures are logged but not retried — the ESP32 can't handle concurrent
+    requests and the cat will likely trigger motion again if still present.
     """
     url = f"http://{camera_ip}/control?still=1"
     ts  = time.strftime("%Y%m%d_%H%M%S")
-
-    for attempt in range(1, FETCH_RETRIES + 1):
-        t0 = time.time()
-        try:
-            resp    = requests.get(url, timeout=HTTP_TIMEOUT)
-            elapsed = time.time() - t0
-            if resp.status_code == 200 and resp.content:
-                if yolo_queue is not None:
-                    try:
-                        yolo_queue.put_nowait(
-                            ("image", resp.content, out_dir, ts, elapsed))
-                        print(f"[+] Frame queued for YOLO  "
-                              f"({len(resp.content)} bytes  fetch={int(elapsed*1000)}ms)",
-                              flush=True)
-                    except Exception:
-                        print("[!] YOLO queue full — frame dropped", file=sys.stderr)
-                        _log_event(out_dir, {"event": "queue_full", "ts_frame": ts})
-                else:
-                    filename = os.path.join(out_dir, f"motion_{ts}.jpg")
-                    with open(filename, "wb") as f:
-                        f.write(resp.content)
-                    print(f"[+] Frame saved: {filename}  "
-                          f"({len(resp.content)} bytes  fetch={int(elapsed*1000)}ms)")
-                return  # success
+    t0  = time.time()
+    try:
+        resp    = requests.get(url, timeout=HTTP_TIMEOUT)
+        elapsed = time.time() - t0
+        if resp.status_code == 200 and resp.content:
+            if yolo_queue is not None:
+                try:
+                    yolo_queue.put_nowait(
+                        ("image", resp.content, out_dir, ts, elapsed))
+                    print(f"[+] Frame queued for YOLO  "
+                          f"({len(resp.content)} bytes  fetch={int(elapsed*1000)}ms)",
+                          flush=True)
+                except Exception:
+                    print("[!] YOLO queue full — frame dropped", file=sys.stderr)
+                    _log_event(out_dir, {"event": "queue_full", "ts_frame": ts})
             else:
-                print(f"[!] HTTP {resp.status_code} from {url} (attempt {attempt})")
-        except requests.exceptions.Timeout:
+                filename = os.path.join(out_dir, f"motion_{ts}.jpg")
+                with open(filename, "wb") as f:
+                    f.write(resp.content)
+                print(f"[+] Frame saved: {filename}  "
+                      f"({len(resp.content)} bytes  fetch={int(elapsed*1000)}ms)")
+        else:
             elapsed = time.time() - t0
-            print(f"[!] Timeout fetching frame (attempt {attempt}/{FETCH_RETRIES}  "
-                  f"{int(elapsed*1000)}ms)", flush=True)
-        except Exception as e:
-            print(f"[!] Fetch error attempt {attempt}/{FETCH_RETRIES}: {e}", flush=True)
-
-        if attempt < FETCH_RETRIES:
-            time.sleep(FETCH_RETRY_DELAY)
-
-    _log_event(out_dir, {
-        "event":   "fetch_failed",
-        "ts_frame": ts,
-        "attempts": FETCH_RETRIES,
-    })
-    print(f"[!] Gave up fetching frame after {FETCH_RETRIES} attempts", file=sys.stderr)
+            print(f"[!] HTTP {resp.status_code} from {url}  ({int(elapsed*1000)}ms)",
+                  flush=True)
+            _log_event(out_dir, {"event": "fetch_failed", "ts_frame": ts,
+                                  "reason": f"HTTP {resp.status_code}"})
+    except requests.exceptions.Timeout:
+        elapsed = time.time() - t0
+        print(f"[!] Timeout fetching frame  ({int(elapsed*1000)}ms)", flush=True)
+        _log_event(out_dir, {"event": "fetch_failed", "ts_frame": ts,
+                              "reason": "timeout"})
+    except Exception as e:
+        print(f"[!] Fetch error: {e}", flush=True)
+        _log_event(out_dir, {"event": "fetch_failed", "ts_frame": ts,
+                              "reason": str(e)})
 
 
 # ---------------------------------------------------------------------------
