@@ -17,7 +17,7 @@ YOLO filtering (--yolo):
           {video}_frames/discarded/ when --save-discarded is set.
           The original .avi is always kept.
   Inference runs in a separate process — MQTT is never blocked.
-  Default model: yolo26n.pt (auto-downloaded by ultralytics on first run).
+  Default model: yolo11n.pt (auto-downloaded by ultralytics on first run).
   Default target classes: 0=person, 15=cat.
 
 Motion log:
@@ -90,8 +90,8 @@ def parse_args():
     # YOLO options
     p.add_argument("--yolo",           action="store_true",
                    help="Enable YOLO-based filtering (requires ultralytics)")
-    p.add_argument("--yolo-model",     default="yolo26n.pt", metavar="MODEL",
-                   help="YOLO model file (default: yolo26n.pt, auto-downloaded)")
+    p.add_argument("--yolo-model",     default="yolo11n.pt", metavar="MODEL",
+                   help="YOLO model file (default: yolo11n.pt, auto-downloaded)")
     p.add_argument("--yolo-conf",      default=0.25, type=float, metavar="CONF",
                    help="Minimum detection confidence (default: 0.25)")
     p.add_argument("--yolo-classes",   default=[0, 15], type=int, nargs="+",
