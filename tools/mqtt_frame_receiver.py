@@ -524,10 +524,11 @@ def on_connect(client, userdata, flags, rc, *args):
         ldr_topic    = userdata["ldr_topic"]
         client.subscribe(motion_topic)
         client.subscribe(ldr_topic)
+        client.subscribe(userdata["lwt_topic"])
         mode = "video" if userdata["video_mode"] else "image"
         yolo = " + YOLO" if userdata["yolo_queue"] is not None else ""
         print(f"[+] Connected ({mode}{yolo} mode). Subscribed to {motion_topic}")
-        print(f"[+] Subscribed to LDR topic: {ldr_topic}")
+        print(f"[+] Subscribed to LDR: {ldr_topic}  LWT: {userdata['lwt_topic']}")
         if userdata.get("ldr_trigger") and userdata.get("cmd_topic"):
             client.publish(userdata["cmd_topic"], "ldr")
             print(f"[*] LDR trigger sent → {userdata['cmd_topic']}")
@@ -539,6 +540,21 @@ def on_message(client, userdata, msg):
     try:
         hostname = hostname_from_topic(msg.topic)
         payload  = msg.payload.decode("utf-8", errors="replace").strip()
+
+        # Camera up/down via LWT
+        if msg.topic == userdata["lwt_topic"] or msg.topic.endswith("/lwt"):
+            status = payload.lower()
+            if status == "online":
+                print(f"[+] Camera {hostname} is ONLINE")
+                _log_event(userdata["out_dir"],
+                           {"event": "camera_online", "host": hostname})
+            elif status == "offline":
+                print(f"[!] Camera {hostname} is OFFLINE")
+                _log_event(userdata["out_dir"],
+                           {"event": "camera_offline", "host": hostname})
+            else:
+                print(f"[lwt/{hostname}] {payload}")
+            return
 
         # LDR reading
         if msg.topic == userdata["ldr_topic"] or msg.topic.endswith("/ldr"):
@@ -611,6 +627,7 @@ def main():
     device       = args.hostname if args.hostname else "+"
     motion_topic = f"{args.prefix}sensor/{device}/motion"
     ldr_topic    = f"{args.prefix}sensor/{device}/ldr"
+    lwt_topic    = f"{args.prefix}sensor/{device}/lwt"
     cmd_topic    = (f"{args.prefix}sensor/{args.hostname}/cmd"
                     if args.hostname else None)
 
@@ -637,6 +654,7 @@ def main():
     userdata = {
         "motion_topic":     motion_topic,
         "ldr_topic":        ldr_topic,
+        "lwt_topic":        lwt_topic,
         "cmd_topic":        cmd_topic,
         "ldr_trigger":      args.ldr_trigger,
         "camera_ip":        args.camera,

@@ -77,6 +77,7 @@ esp_ping_handle_t pingHandle = NULL;
 bool usePing = true;
 
 static void startPing();
+static void stopPing();
 static void printGpioInfo();
 static void boardInfo();
 
@@ -156,6 +157,10 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       LOG_WRN("WiFi Station disconnected, reason: %d, heap: %u",
         info.wifi_sta_disconnected.reason, ESP.getFreeHeap());
+      // Restart the ping session immediately so the first ping fires at once
+      // and triggers reconnect within ~5s instead of waiting up to wifiTimeoutSecs
+      stopPing();
+      startPing();
       break;
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: LOG_INF("WiFi AP client connection"); break;
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED: LOG_INF("WiFi AP client disconnection"); break;
@@ -360,9 +365,13 @@ static bool startWifi(bool firstcall = true) {
       if (!strcmp(WiFi.SSID(i).c_str(), ST_SSID))
         LOG_INF("Wifi stats for %s - signal strength: %d dBm; Encryption: %s; channel: %u",  ST_SSID, WiFi.RSSI(i), getEncType(i), WiFi.channel(i));
     }
-    if (wlStat != WL_CONNECTED) LOG_WRN("SSID %s not connected %s", ST_SSID, wifiStatusStr(wlStat));
+    if (wlStat == WL_CONNECTED) {
+      // Keep radio fully awake — modem sleep can cause missed beacons on poor signal
+      esp_wifi_set_ps(WIFI_PS_NONE);
+      LOG_INF("WiFi modem sleep disabled");
+    } else LOG_WRN("SSID %s not connected %s", ST_SSID, wifiStatusStr(wlStat));
   }
-  
+
   if (wlStat == WL_NO_SSID_AVAIL || allowAP) setWifiAP(); // AP allowed if no Station SSID eg on first time use 
 #if CONFIG_IDF_TARGET_ESP32S3
   if (netMode == 0) setupMdnsHost(); // not on ESP32 as uses 6k of heap
