@@ -77,7 +77,6 @@ esp_ping_handle_t pingHandle = NULL;
 bool usePing = true;
 
 static void startPing();
-static void stopPing();
 static void printGpioInfo();
 static void boardInfo();
 
