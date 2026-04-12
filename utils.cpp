@@ -332,8 +332,6 @@ static bool startWifi(bool firstcall = true) {
     esp_wifi_set_country(&country); // allow channels 1-13 (default US only allows 1-11)
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
     WiFi.STA.setAutoReconnect(false); // Set whether module will attempt to reconnect to an access point in case it is disconnected
-    WiFi.AP.clear();
-    WiFi.AP.end(); // kill rogue AP on startup
     WiFi.STA.setHostname(hostName);
     delay(100);
   }
