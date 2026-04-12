@@ -57,6 +57,7 @@ DEFAULT_OUTPUT_DIR    = "./motion_frames"
 DEFAULT_VIDEO_TIMEOUT = 300   # seconds
 HTTP_TIMEOUT          = 5     # seconds for still-image requests
 YOLO_QUEUE_MAXSIZE    = 100   # drop items rather than grow unbounded
+SCRIPT_DIR            = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 
 
@@ -121,6 +122,87 @@ def _log_event(out_dir, entry):
             fcntl.flock(f, fcntl.LOCK_UN)
     except Exception as e:
         print(f"[!] motion log write failed: {e}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Feeder log — LDR readings with optional food-level calibration
+# ---------------------------------------------------------------------------
+
+def _load_calibration():
+    """Load calibration.txt from the script directory.
+
+    Format: two tab- (or whitespace-) separated columns per line:
+        ldr_differential  food_level
+    Lines starting with # are ignored.  Returns a list of (diff, level)
+    sorted by diff, or None if the file doesn't exist or is empty.
+    """
+    cal_path = os.path.join(SCRIPT_DIR, "calibration.txt")
+    if not os.path.exists(cal_path):
+        return None
+    points = []
+    try:
+        with open(cal_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        points.append((float(parts[0]), float(parts[1])))
+                    except ValueError:
+                        pass
+        points.sort(key=lambda p: p[0])
+    except Exception as e:
+        print(f"[!] calibration.txt read error: {e}", file=sys.stderr)
+    return points if points else None
+
+
+def _interpolate_food_level(differential, calibration):
+    """Return food level string interpolated from calibration, or 'unknown'."""
+    if not calibration:
+        return "unknown"
+    if len(calibration) == 1:
+        return f"{calibration[0][1]:.1f}"
+    if differential <= calibration[0][0]:
+        return f"{calibration[0][1]:.1f}"
+    if differential >= calibration[-1][0]:
+        return f"{calibration[-1][1]:.1f}"
+    for (x0, y0), (x1, y1) in zip(calibration, calibration[1:]):
+        if x0 <= differential <= x1:
+            t = (differential - x0) / (x1 - x0)
+            return f"{y0 + t * (y1 - y0):.1f}"
+    return "unknown"
+
+
+_FEEDER_LOG_HEADER = "timestamp\tambient\tilluminated\tdifferential\tpercent\tfood_level\n"
+
+def _log_feeder(ldr_data):
+    """Append one LDR reading to feeder_log.txt next to the script.
+
+    Calibration is re-read on every call so the file can be updated
+    without restarting the script.
+    """
+    log_path = os.path.join(SCRIPT_DIR, "feeder_log.txt")
+    calibration = _load_calibration()
+    differential = ldr_data.get("differential", 0)
+    food_level   = _interpolate_food_level(differential, calibration)
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = (f"{ts}\t"
+            f"{ldr_data.get('ambient', '')}\t"
+            f"{ldr_data.get('illuminated', '')}\t"
+            f"{differential}\t"
+            f"{ldr_data.get('percent', '')}\t"
+            f"{food_level}\n")
+    try:
+        write_header = not os.path.exists(log_path)
+        with open(log_path, "a") as f:
+            if write_header:
+                f.write(_FEEDER_LOG_HEADER)
+            f.write(line)
+    except Exception as e:
+        print(f"[!] feeder_log.txt write error: {e}", file=sys.stderr)
+    return food_level
 
 
 # ---------------------------------------------------------------------------
@@ -564,8 +646,9 @@ def on_message(client, userdata, msg):
                 illuminated  = data.get("illuminated", "?")
                 differential = data.get("differential", "?")
                 percent      = data.get("percent", "?")
+                food_level   = _log_feeder(data)
                 print(f"[ldr/{hostname}] ambient={ambient} illuminated={illuminated} "
-                      f"differential={differential} ({percent}%)")
+                      f"differential={differential} ({percent}%)  food={food_level}")
             except json.JSONDecodeError:
                 print(f"[ldr/{hostname}] {payload}")
             return
