@@ -346,10 +346,17 @@ int readLDR() {
 
 // Perform one differential LDR measurement and publish result via MQTT.
 // Safe to call from any task or from checkForRemoteQuery().
+// Does not require ldrUse=true — an explicit on-demand trigger should
+// always work as long as ldrPin is configured.
 void takeLdrReading() {
-  if (!ldrUse || ldrPin <= 0) {
-    LOG_WRN("LDR not configured");
+  if (ldrPin <= 0) {
+    LOG_WRN("LDR pin not configured (set ldrPin in web UI)");
     return;
+  }
+  // Ensure LED pin is configured as output regardless of whether setupLDR ran
+  if (ldrLedPin > 0) {
+    pinMode(ldrLedPin, OUTPUT);
+    digitalWrite(ldrLedPin, LOW);
   }
   int ambient = smoothAnalog(ldrPin);
   int illuminated = ambient;
