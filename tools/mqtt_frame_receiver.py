@@ -177,14 +177,19 @@ def _interpolate_food_level(differential, calibration):
 
 _FEEDER_LOG_HEADER = "timestamp\tambient\tilluminated\tdifferential\tpercent\tfood_level\n"
 
-def _log_feeder(ldr_data):
-    """Append one LDR reading to feeder_log.txt next to the script.
+def _log_feeder(ldr_data, out_dir):
+    """Append one LDR reading to feeder_log.txt.
+
+    Location is decided by calibration presence:
+      - calibration.txt missing → next to the script (safe during calibration)
+      - calibration.txt present → out_dir alongside motion frames
 
     Calibration is re-read on every call so the file can be updated
     without restarting the script.
     """
-    log_path = os.path.join(SCRIPT_DIR, "feeder_log.txt")
     calibration = _load_calibration()
+    log_dir  = out_dir if calibration is not None else SCRIPT_DIR
+    log_path = os.path.join(log_dir, "feeder_log.txt")
     differential = ldr_data.get("differential", 0)
     food_level   = _interpolate_food_level(differential, calibration)
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -646,7 +651,7 @@ def on_message(client, userdata, msg):
                 illuminated  = data.get("illuminated", "?")
                 differential = data.get("differential", "?")
                 percent      = data.get("percent", "?")
-                food_level   = _log_feeder(data)
+                food_level   = _log_feeder(data, userdata["out_dir"])
                 print(f"[ldr/{hostname}] ambient={ambient} illuminated={illuminated} "
                       f"differential={differential} ({percent}%)  food={food_level}")
             except json.JSONDecodeError:
