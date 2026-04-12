@@ -191,6 +191,7 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
 
 static void setWifiAP() {
   if (!APstarted) {
+    WiFi.mode(WIFI_AP_STA); // Enable AP+STA mode now that we actually need the AP
     WiFi.AP.begin();
     // Set access point with static ip if provided
     if (strlen(AP_ip) > 1) {
@@ -326,7 +327,7 @@ static bool startWifi(bool firstcall = true) {
   }
 #endif
   if (firstcall) {
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(WIFI_STA); // Start STA-only; AP mode added later only if STA fails
     wifi_country_t country = {.cc="EU", .schan=1, .nchan=13, .max_tx_power=80, .policy=WIFI_COUNTRY_POLICY_MANUAL};
     esp_wifi_set_country(&country); // allow channels 1-13 (default US only allows 1-11)
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
