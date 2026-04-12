@@ -372,7 +372,7 @@ static bool startWifi(bool firstcall = true) {
     } else LOG_WRN("SSID %s not connected %s", ST_SSID, wifiStatusStr(wlStat));
   }
 
-  if (wlStat != WL_CONNECTED || allowAP) setWifiAP(); // AP as fallback on any failure, or simultaneously if allowAP set
+  if ((firstcall && wlStat != WL_CONNECTED) || allowAP) setWifiAP(); // AP on boot failure only, or simultaneously if allowAP set
 #if CONFIG_IDF_TARGET_ESP32S3
   if (netMode == 0) setupMdnsHost(); // not on ESP32 as uses 6k of heap
 #endif
