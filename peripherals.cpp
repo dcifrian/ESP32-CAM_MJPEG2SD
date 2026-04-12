@@ -380,8 +380,19 @@ void takeLdrReading() {
 static void ldrTask(void* parameter) {
   if (ldrInterval < 1) ldrInterval = 1;
   while (true) {
+    // Align to wall-clock multiples of ldrInterval so readings happen at
+    // predictable times (e.g. every hour on the hour) regardless of boot time.
+    // Falls back to a plain interval delay if NTP hasn't synced yet (time < 2001).
+    time_t now = time(NULL);
+    long interval_secs = (long)ldrInterval;
+    if (now > 978307200L) { // past 2001-01-01 → NTP synced
+      time_t next = ((now / interval_secs) + 1) * interval_secs;
+      long wait_ms = (long)(next - now) * 1000L;
+      delay(wait_ms);
+    } else {
+      delay(interval_secs * 1000L);
+    }
     takeLdrReading();
-    delay(ldrInterval * 1000);
   }
   vTaskDelete(NULL);
 }

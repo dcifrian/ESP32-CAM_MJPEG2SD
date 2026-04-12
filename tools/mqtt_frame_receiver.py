@@ -654,6 +654,9 @@ def on_message(client, userdata, msg):
                 food_level   = _log_feeder(data, userdata["out_dir"])
                 print(f"[ldr/{hostname}] ambient={ambient} illuminated={illuminated} "
                       f"differential={differential} ({percent}%)  food={food_level}")
+                ldr_done = userdata.get("ldr_done")
+                if ldr_done is not None:
+                    ldr_done.set()
             except json.JSONDecodeError:
                 print(f"[ldr/{hostname}] {payload}")
             return
@@ -739,12 +742,15 @@ def main():
               f"conf={args.yolo_conf}  classes={args.yolo_classes}"
               + ("  save-discarded=on" if args.save_discarded else ""))
 
+    ldr_done = threading.Event() if args.ldr_trigger else None
+
     userdata = {
         "motion_topic":     motion_topic,
         "ldr_topic":        ldr_topic,
         "lwt_topic":        lwt_topic,
         "cmd_topic":        cmd_topic,
         "ldr_trigger":      args.ldr_trigger,
+        "ldr_done":         ldr_done,
         "camera_ip":        args.camera,
         "out_dir":          args.outdir,
         "video_mode":       args.video,
@@ -777,6 +783,17 @@ def main():
     if args.ldr_trigger:
         print(f"[*] LDR trigger on connect → {cmd_topic}")
     client.connect(args.broker, args.port, keepalive=60)
+
+    if ldr_done is not None:
+        # Single-shot mode: connect, send trigger, wait for reading or timeout
+        client.loop_start()
+        received = ldr_done.wait(timeout=30)
+        client.loop_stop()
+        client.disconnect()
+        if not received:
+            print("[!] No LDR reading received within 30s", file=sys.stderr)
+            sys.exit(1)
+        return
 
     try:
         client.loop_forever()
