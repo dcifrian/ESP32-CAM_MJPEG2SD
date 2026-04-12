@@ -348,8 +348,9 @@ static bool startWifi(bool firstcall = true) {
         if (attempt > 1) {
           LOG_WRN("WiFi connect attempt %d/5, retrying ...", attempt);
           WiFi.STA.disconnect();
-          WiFi.STA.stop(); // fully reset radio state — without this, begin() is a no-op on a running stack
+          esp_wifi_stop();  // fully reset radio state — WiFi.STA.begin() is a no-op on a running stack
           delay(500);
+          esp_wifi_start(); // bring radio back up before setWifiSTA
           setWifiSTA();
         }
         uint32_t startAttemptTime = millis();
