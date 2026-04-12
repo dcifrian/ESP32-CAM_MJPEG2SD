@@ -65,6 +65,7 @@ bool ldrUse;
 int ldrPin;
 int ldrLedPin;
 int ldrInterval;
+int ldrStartMins;
 
 // additional peripheral configuration
 // configure for specific servo model, eg for SG90
@@ -380,15 +381,18 @@ void takeLdrReading() {
 static void ldrTask(void* parameter) {
   if (ldrInterval < 1) ldrInterval = 1;
   while (true) {
-    // Align to wall-clock multiples of ldrInterval so readings happen at
-    // predictable times (e.g. every hour on the hour) regardless of boot time.
-    // Falls back to a plain interval delay if NTP hasn't synced yet (time < 2001).
+    // Fire at ldrStartMins + N * ldrInterval, aligned to wall clock.
+    // e.g. ldrStartMins=480 (08:00), ldrInterval=3600 → reads at 08:00, 09:00, ...
+    // Falls back to plain interval if NTP hasn't synced yet.
     time_t now = time(NULL);
     long interval_secs = (long)ldrInterval;
     if (now > 978307200L) { // past 2001-01-01 → NTP synced
-      time_t next = ((now / interval_secs) + 1) * interval_secs;
-      long wait_ms = (long)(next - now) * 1000L;
-      delay(wait_ms);
+      long start_secs  = (long)ldrStartMins * 60L;
+      long tod         = (long)(now % 86400L);
+      // seconds elapsed within the current interval slot (offset from start)
+      long since_start = ((tod - start_secs) % interval_secs + interval_secs) % interval_secs;
+      long wait_secs   = interval_secs - since_start;
+      delay(wait_secs * 1000L);
     } else {
       delay(interval_secs * 1000L);
     }

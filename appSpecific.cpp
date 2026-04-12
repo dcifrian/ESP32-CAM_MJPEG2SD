@@ -130,6 +130,7 @@ bool updateAppStatus(const char* variable, const char* value, bool fromUser) {
   else if (!strcmp(variable, "ldrPin")) ldrPin = intVal;
   else if (!strcmp(variable, "ldrLedPin")) ldrLedPin = intVal;
   else if (!strcmp(variable, "ldrInterval")) ldrInterval = intVal;
+  else if (!strcmp(variable, "ldrStartMins")) ldrStartMins = intVal;
 #endif
 #if INCLUDE_I2C
   else if (!strcmp(variable, "I2Csda")) I2Csda = intVal;
@@ -939,6 +940,7 @@ voltUse~0~3~C~Use Voltage check
 ldrPin~~3~N~ADC Pin used for LDR sensor (recommended: GPIO1)
 ldrLedPin~~3~N~Pin for LDR illumination LED (recommended: GPIO15; -1 to disable)
 ldrInterval~1~3~N~LDR check interval (secs)
+ldrStartMins~0~3~N~LDR start time offset from midnight (mins, e.g. 480=08:00)
 ldrUse~0~3~C~Use LDR sensor
 wakePin~~3~N~Pin used to wake app from sleep
 wakeLevel~1~3~N~Pin level (0,1) to wake app from sleep

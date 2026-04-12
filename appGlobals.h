@@ -437,7 +437,8 @@ extern int voltPin;
 extern bool ldrUse;    // true to enable LDR monitoring
 extern int ldrPin;     // ADC pin connected to LDR (recommended: GPIO1 = ADC1_CH0)
 extern int ldrLedPin;  // pin for illumination LED; -1 if unused
-extern int ldrInterval; // seconds between readings
+extern int ldrInterval;   // seconds between readings
+extern int ldrStartMins;  // minutes since midnight for first daily reading (e.g. 480 = 08:00)
 void takeLdrReading();  // one-shot differential measurement + MQTT publish
 
 // audio
