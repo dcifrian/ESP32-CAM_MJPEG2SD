@@ -58,6 +58,11 @@ DEFAULT_VIDEO_TIMEOUT = 300   # seconds
 HTTP_TIMEOUT          = 5     # seconds for still-image requests
 YOLO_QUEUE_MAXSIZE    = 100   # drop items rather than grow unbounded
 SCRIPT_DIR            = os.path.dirname(os.path.abspath(__file__))
+# LDR food-level estimation parameters (adjust to match your cat's intake)
+_FLAT_ZONE_MAX_DIFF   = 1160   # differential above this → reliable low-food zone (< ~600 g)
+_FLAT_ZONE_MIN_DIFF   = 950    # differential below this → reliable high-food zone (> ~1100 g)
+_REFILL_DROP          = 800    # minimum drop in differential to detect a refill event
+_CONSUMPTION_GPD      = 35.0   # grams per day nominal consumption
 # ---------------------------------------------------------------------------
 
 
@@ -131,31 +136,43 @@ def _log_event(out_dir, entry):
 def _load_calibration():
     """Load calibration.txt from the script directory.
 
-    Format: two tab- (or whitespace-) separated columns per line:
-        ldr_differential  food_level
-    Lines starting with # are ignored.  Returns a list of (diff, level)
-    sorted by diff, or None if the file doesn't exist or is empty.
+    Supports two sections separated by a [high] marker:
+      - Default / [low] section: 0-600 g range (high differential → low food)
+      - [high] section:          600-1400 g range (flat zone + upper range)
+
+    Each line: differential  food_grams  (whitespace separated; # = comment)
+
+    Returns (cal_low, cal_high), each a list of (diff, food) sorted by diff
+    ascending, or None if that section is absent/empty.
     """
     cal_path = os.path.join(SCRIPT_DIR, "calibration.txt")
     if not os.path.exists(cal_path):
-        return None
-    points = []
+        return None, None
+    low_pts, high_pts = [], []
+    section = low_pts
     try:
         with open(cal_path) as f:
-            for line in f:
-                line = line.strip()
+            for raw in f:
+                line = raw.strip()
                 if not line or line.startswith("#"):
+                    continue
+                if line.lower() == "[high]":
+                    section = high_pts
+                    continue
+                if line.lower() == "[low]":
+                    section = low_pts
                     continue
                 parts = line.split()
                 if len(parts) >= 2:
                     try:
-                        points.append((float(parts[0]), float(parts[1])))
+                        section.append((float(parts[0]), float(parts[1])))
                     except ValueError:
                         pass
-        points.sort(key=lambda p: p[0])
+        low_pts.sort(key=lambda p: p[0])
+        high_pts.sort(key=lambda p: p[0])
     except Exception as e:
         print(f"[!] calibration.txt read error: {e}", file=sys.stderr)
-    return points if points else None
+    return (low_pts or None, high_pts or None)
 
 
 def _interpolate_food_level(differential, calibration):
@@ -175,30 +192,137 @@ def _interpolate_food_level(differential, calibration):
     return "unknown"
 
 
-_FEEDER_LOG_HEADER = "timestamp\tambient\tilluminated\tdifferential\tpercent\tfood_level\n"
+def _find_feeder_log(log_dir):
+    """Return path to feeder_log.txt, preferring log_dir then SCRIPT_DIR."""
+    for d in [log_dir, SCRIPT_DIR]:
+        if d:
+            p = os.path.join(d, "feeder_log.txt")
+            if os.path.exists(p):
+                return p
+    return None
+
+
+def _find_last_refill(log_path, cal_high):
+    """Scan feeder_log.txt for the most recent refill event.
+
+    A refill is detected when differential drops by > _REFILL_DROP and lands
+    below _FLAT_ZONE_MIN_DIFF (food clearly in the upper range after refill).
+    The first log entry with low differential also counts as an initial state.
+
+    Returns (unix_timestamp, food_grams_at_refill) or None.
+    """
+    if not log_path:
+        return None
+    entries = []
+    try:
+        with open(log_path) as f:
+            for line in f:
+                if line.startswith("timestamp") or line.startswith("#") or not line.strip():
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 4:
+                    continue
+                try:
+                    ts   = time.mktime(time.strptime(parts[0], "%Y-%m-%d %H:%M:%S"))
+                    diff = float(parts[3])
+                    entries.append((ts, diff))
+                except (ValueError, IndexError):
+                    pass
+    except Exception as e:
+        print(f"[!] feeder_log refill scan error: {e}", file=sys.stderr)
+        return None
+
+    if not entries:
+        return None
+
+    def food_at(d):
+        if cal_high:
+            try:
+                return float(_interpolate_food_level(d, cal_high))
+            except (ValueError, TypeError):
+                pass
+        return 1200.0  # fallback if no high calibration
+
+    last_refill = None
+
+    # First entry with low differential → feeder was full at log start
+    if entries[0][1] < _FLAT_ZONE_MIN_DIFF:
+        last_refill = (entries[0][0], food_at(entries[0][1]))
+
+    for i in range(1, len(entries)):
+        prev_diff        = entries[i - 1][1]
+        curr_ts, curr_diff = entries[i]
+        if prev_diff - curr_diff > _REFILL_DROP and curr_diff < _FLAT_ZONE_MIN_DIFF:
+            last_refill = (curr_ts, food_at(curr_diff))
+
+    return last_refill
+
+
+def _estimate_food_level(differential, cal_low, cal_high, log_dir):
+    """Estimate food level from differential + calibration + log history.
+
+    Returns (food_level_str, source_str).
+
+    source values:
+      'calibrated'  — direct calibration lookup, reliable
+      'log_estimated' — time-based estimate from last refill event in log
+      'approx'      — flat-zone calibration fallback, low reliability
+      'unknown'     — no data available
+    """
+    # Unambiguous low-food zone
+    if differential > _FLAT_ZONE_MAX_DIFF:
+        if cal_low:
+            return _interpolate_food_level(differential, cal_low), "calibrated"
+        return "unknown", "unknown"
+
+    # Unambiguous high-food zone
+    if differential < _FLAT_ZONE_MIN_DIFF:
+        if cal_high:
+            return _interpolate_food_level(differential, cal_high), "calibrated"
+        return "unknown", "unknown"
+
+    # Flat / ambiguous zone — prefer log-based time estimate
+    log_path = _find_feeder_log(log_dir)
+    refill   = _find_last_refill(log_path, cal_high) if log_path else None
+
+    if refill:
+        refill_ts, refill_food = refill
+        elapsed_h = (time.time() - refill_ts) / 3600
+        est = refill_food - elapsed_h * (_CONSUMPTION_GPD / 24)
+        return f"{max(0, min(1400, est)):.0f}", "log_estimated"
+
+    # No log history: rough calibration fallback
+    for cal in [cal_high, cal_low]:
+        if cal:
+            return _interpolate_food_level(differential, cal), "approx"
+    return "unknown", "unknown"
+
+
+_FEEDER_LOG_HEADER = "timestamp\tambient\tilluminated\tdifferential\tpercent\tfood_level\tsource\n"
+
 
 def _log_feeder(ldr_data, out_dir):
     """Append one LDR reading to feeder_log.txt.
 
-    Location is decided by calibration presence:
-      - calibration.txt missing → next to the script (safe during calibration)
-      - calibration.txt present → out_dir alongside motion frames
-
-    Calibration is re-read on every call so the file can be updated
-    without restarting the script.
+    Location: next to the script while no calibration exists (calibration
+    phase), then in out_dir once calibration.txt is present.
+    Calibration and log history are re-read on every call.
     """
-    calibration = _load_calibration()
-    log_dir  = out_dir if calibration is not None else SCRIPT_DIR
+    cal_low, cal_high = _load_calibration()
+    log_dir  = out_dir if (cal_low is not None or cal_high is not None) else SCRIPT_DIR
     log_path = os.path.join(log_dir, "feeder_log.txt")
-    differential = ldr_data.get("differential", 0)
-    food_level   = _interpolate_food_level(differential, calibration)
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    differential        = ldr_data.get("differential", 0)
+    food_level, source  = _estimate_food_level(differential, cal_low, cal_high, log_dir)
+
+    ts   = time.strftime("%Y-%m-%d %H:%M:%S")
     line = (f"{ts}\t"
             f"{ldr_data.get('ambient', '')}\t"
             f"{ldr_data.get('illuminated', '')}\t"
             f"{differential}\t"
             f"{ldr_data.get('percent', '')}\t"
-            f"{food_level}\n")
+            f"{food_level}\t"
+            f"{source}\n")
     try:
         write_header = not os.path.exists(log_path)
         with open(log_path, "a") as f:
@@ -643,20 +767,39 @@ def on_message(client, userdata, msg):
                 print(f"[lwt/{hostname}] {payload}")
             return
 
-        # LDR reading
+        # LDR reading — collect 5 samples, log the median
         if msg.topic == userdata["ldr_topic"] or msg.topic.endswith("/ldr"):
             try:
-                data         = json.loads(payload)
-                ambient      = data.get("ambient", "?")
-                illuminated  = data.get("illuminated", "?")
-                differential = data.get("differential", "?")
-                percent      = data.get("percent", "?")
-                food_level   = _log_feeder(data, userdata["out_dir"])
-                print(f"[ldr/{hostname}] ambient={ambient} illuminated={illuminated} "
-                      f"differential={differential} ({percent}%)  food={food_level}")
-                ldr_done = userdata.get("ldr_done")
-                if ldr_done is not None:
-                    ldr_done.set()
+                data = json.loads(payload)
+                buf  = userdata["ldr_buffer"]
+
+                # Discard stale buffer from a previous burst (> 60 s old)
+                if buf and time.time() - userdata["ldr_buffer_ts"] > 60:
+                    print(f"[ldr/{hostname}] stale buffer ({len(buf)} readings discarded)")
+                    buf.clear()
+
+                buf.append(data)
+                userdata["ldr_buffer_ts"] = time.time()
+                sample = data.get("sample", len(buf))
+                print(f"[ldr/{hostname}] sample {sample}/5 — "
+                      f"ambient={data.get('ambient','?')} "
+                      f"illuminated={data.get('illuminated','?')} "
+                      f"differential={data.get('differential','?')}")
+
+                if len(buf) >= 5:
+                    # Median of 5: sort by differential, take the middle value
+                    sorted_buf  = sorted(buf, key=lambda x: x.get("differential", 0))
+                    median_data = sorted_buf[2]
+                    food_level  = _log_feeder(median_data, userdata["out_dir"])
+                    print(f"[ldr/{hostname}] median → "
+                          f"ambient={median_data.get('ambient','?')} "
+                          f"illuminated={median_data.get('illuminated','?')} "
+                          f"differential={median_data.get('differential','?')} "
+                          f"({median_data.get('percent','?')}%)  food={food_level}")
+                    buf.clear()
+                    ldr_done = userdata.get("ldr_done")
+                    if ldr_done is not None:
+                        ldr_done.set()
             except json.JSONDecodeError:
                 print(f"[ldr/{hostname}] {payload}")
             return
@@ -760,6 +903,8 @@ def main():
         "stop_event":       None,
         "current_response": None,
         "last_motion_time": None,
+        "ldr_buffer":       [],
+        "ldr_buffer_ts":    0.0,
     }
 
     if hasattr(mqtt, "CallbackAPIVersion"):

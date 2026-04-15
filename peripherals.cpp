@@ -359,23 +359,25 @@ void takeLdrReading() {
     pinMode(ldrLedPin, OUTPUT);
     digitalWrite(ldrLedPin, LOW);
   }
-  int ambient = smoothAnalog(ldrPin);
-  int illuminated = ambient;
-  if (ldrLedPin > 0) {
-    digitalWrite(ldrLedPin, HIGH);
-    delay(20);
-    illuminated = smoothAnalog(ldrPin);
-    digitalWrite(ldrLedPin, LOW);
+  for (int sample = 1; sample <= 5; sample++) {
+    int ambient = smoothAnalog(ldrPin);
+    int illuminated = ambient;
+    if (ldrLedPin > 0) {
+      digitalWrite(ldrLedPin, HIGH);
+      delay(20);
+      illuminated = smoothAnalog(ldrPin);
+      digitalWrite(ldrLedPin, LOW);
+    }
+    int differential = max(0, illuminated - ambient);
+    currentLdrVal = differential;
+    int percent = differential * 100 / MAX_ADC;
+    LOG_INF("LDR sample %d/5: ambient=%d illuminated=%d differential=%d (%d%%)", sample, ambient, illuminated, differential, percent);
+    char payload[96];
+    snprintf(payload, sizeof(payload),
+      "{\"sample\":%d,\"ambient\":%d,\"illuminated\":%d,\"differential\":%d,\"percent\":%d}",
+      sample, ambient, illuminated, differential, percent);
+    mqttPublishPath("ldr", payload);
   }
-  int differential = max(0, illuminated - ambient);
-  currentLdrVal = differential;
-  int percent = differential * 100 / MAX_ADC;
-  LOG_INF("LDR: ambient=%d illuminated=%d differential=%d (%d%%)", ambient, illuminated, differential, percent);
-  char payload[80];
-  snprintf(payload, sizeof(payload),
-    "{\"ambient\":%d,\"illuminated\":%d,\"differential\":%d,\"percent\":%d}",
-    ambient, illuminated, differential, percent);
-  mqttPublishPath("ldr", payload);
 }
 
 static void ldrTask(void* parameter) {
