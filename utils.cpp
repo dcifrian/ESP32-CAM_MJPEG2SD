@@ -337,6 +337,7 @@ static bool startWifi(bool firstcall = true) {
     WiFi.mode(WIFI_STA);
     wifi_country_t country = {.cc="EU", .schan=1, .nchan=13, .max_tx_power=80, .policy=WIFI_COUNTRY_POLICY_MANUAL};
     esp_wifi_set_country(&country); // allow channels 1-13 (default US only allows 1-11)
+    WiFi.setTxPower(WIFI_POWER_8_5dBm); // reduce from default 20 dBm; high TX power causes ASSOC_EXPIRE on nearby routers
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
     WiFi.STA.setAutoReconnect(false); // Set whether module will attempt to reconnect to an access point in case it is disconnected
     WiFi.STA.setHostname(hostName);
@@ -357,6 +358,7 @@ static bool startWifi(bool firstcall = true) {
           esp_wifi_stop();  // fully reset radio state — WiFi.STA.begin() is a no-op on a running stack
           delay(500);
           esp_wifi_start(); // bring radio back up before setWifiSTA
+          WiFi.setTxPower(WIFI_POWER_8_5dBm); // esp_wifi_start() resets TX power to default
           setWifiSTA();
         }
         uint32_t startAttemptTime = millis();
@@ -366,13 +368,10 @@ static bool startWifi(bool firstcall = true) {
         }
       }
     }
-    // show stats of requested SSID
-    int numNetworks = WiFi.scanNetworks();
-    for (int i=0; i < numNetworks; i++) {
-      if (!strcmp(WiFi.SSID(i).c_str(), ST_SSID))
-        LOG_INF("Wifi stats for %s - signal strength: %d dBm; Encryption: %s; channel: %u",  ST_SSID, WiFi.RSSI(i), getEncType(i), WiFi.channel(i));
-    }
     if (wlStat == WL_CONNECTED) {
+      // Read RSSI and channel directly — scanNetworks() takes the radio off-channel
+      // for ~2s right after association and causes the router to deassociate us.
+      LOG_INF("Wifi stats for %s - signal strength: %d dBm, channel: %u", ST_SSID, WiFi.RSSI(), WiFi.channel());
       // Keep radio fully awake — modem sleep can cause missed beacons on poor signal
       esp_wifi_set_ps(WIFI_PS_NONE);
       LOG_INF("WiFi modem sleep disabled");
