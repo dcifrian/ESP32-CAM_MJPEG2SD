@@ -205,6 +205,11 @@ static void setWifiAP() {
 }
 
 static void setWifiSTA() {
+  // Cancel any implicit NVS-based reconnect that the driver may have started
+  // before our explicit connect() call.  Without this, WiFi.STA.begin() can
+  // fire a hidden auth attempt using stored credentials, producing a spurious
+  // AUTH_EXPIRE ~1s before our connect() even runs.
+  WiFi.STA.disconnect();
   // set station with static ip if provided
   if (strlen(ST_ip) > 1) {
     IPAddress _ip, _gw, _sn, _ns1, _ns2;
@@ -218,9 +223,9 @@ static void setWifiSTA() {
       // set static ip
       WiFi.STA.config(_ip, _gw, _sn, _ns1); // need DNS for SNTP
       LOG_INF("Wifi Station set static IP");
-    } 
+    }
   } else LOG_INF("Wifi Station IP from DHCP");
-  WiFi.STA.enableIPv6(USE_IP6); 
+  WiFi.STA.enableIPv6(USE_IP6);
   WiFi.STA.begin();
   WiFi.STA.connect(ST_SSID, ST_Pass);
   debugMemory("setWifiSTA");
@@ -323,7 +328,13 @@ static bool startWifi(bool firstcall = true) {
   }
 #endif
   if (firstcall) {
-    WiFi.mode(WIFI_STA); // Start STA-only; AP mode added later only if STA fails
+    // Brief WIFI_OFF → WIFI_STA transition: the driver sends a Deauthentication
+    // frame when it goes offline, which tells the router to drop any stale session
+    // for our MAC left over from a previous crash or flash.  Without this, the
+    // router holds the old association and rejects our new auth with reason 2.
+    WiFi.mode(WIFI_OFF);
+    delay(500);
+    WiFi.mode(WIFI_STA);
     wifi_country_t country = {.cc="EU", .schan=1, .nchan=13, .max_tx_power=80, .policy=WIFI_COUNTRY_POLICY_MANUAL};
     esp_wifi_set_country(&country); // allow channels 1-13 (default US only allows 1-11)
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
