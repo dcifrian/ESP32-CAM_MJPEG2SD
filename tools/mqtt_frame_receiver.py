@@ -103,6 +103,8 @@ def parse_args():
     p.add_argument("--yolo-classes",   default=[0, 15], type=int, nargs="+",
                    metavar="ID",
                    help="COCO class IDs to keep (default: 0=person 15=cat)")
+    p.add_argument("--yolo-device",    default="cpu", metavar="DEVICE",
+                   help="Device for YOLO inference: 'cpu', 'cuda:0', '0', etc. (default: cpu)")
     p.add_argument("--save-discarded", action="store_true",
                    help="Write frames with no detections to {outdir}/discarded/ "
                         "(or {video}_frames/discarded/ for videos). "
@@ -338,7 +340,8 @@ def _log_feeder(ldr_data, out_dir):
 # YOLO worker — runs in a separate process
 # ---------------------------------------------------------------------------
 
-def yolo_worker(queue, model_path, conf_threshold, target_classes, save_discarded):
+def yolo_worker(queue, model_path, conf_threshold, target_classes, save_discarded,
+                device='cpu'):
     """Pull work items from queue and run YOLO inference.
 
     Item formats:
@@ -353,10 +356,11 @@ def yolo_worker(queue, model_path, conf_threshold, target_classes, save_discarde
               file=sys.stderr)
         return
 
-    print(f"[yolo] Loading {model_path} ...", flush=True)
+    print(f"[yolo] Loading {model_path} on {device} ...", flush=True)
     model = YOLO(model_path)
+    model.to(device)
     names = model.names
-    print(f"[yolo] Ready. Target classes: "
+    print(f"[yolo] Ready on {device}. Target classes: "
           f"{[names.get(c, str(c)) for c in target_classes]}  conf≥{conf_threshold}",
           flush=True)
 
@@ -877,12 +881,13 @@ def main():
         yolo_process = multiprocessing.Process(
             target=yolo_worker,
             args=(yolo_queue, args.yolo_model, args.yolo_conf,
-                  args.yolo_classes, args.save_discarded),
+                  args.yolo_classes, args.save_discarded, args.yolo_device),
             daemon=True,
         )
         yolo_process.start()
         print(f"[*] YOLO worker started  model={args.yolo_model}  "
-              f"conf={args.yolo_conf}  classes={args.yolo_classes}"
+              f"conf={args.yolo_conf}  classes={args.yolo_classes}  "
+              f"device={args.yolo_device}"
               + ("  save-discarded=on" if args.save_discarded else ""))
 
     ldr_done = threading.Event() if args.ldr_trigger else None
