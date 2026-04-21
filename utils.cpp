@@ -156,10 +156,6 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       LOG_WRN("WiFi Station disconnected, reason: %d, heap: %u",
         info.wifi_sta_disconnected.reason, ESP.getFreeHeap());
-      // Restart the ping session immediately so the first ping fires at once
-      // and triggers reconnect within ~5s instead of waiting up to wifiTimeoutSecs
-      stopPing();
-      startPing();
       break;
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED: LOG_INF("WiFi AP client connection"); break;
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED: LOG_INF("WiFi AP client disconnection"); break;
@@ -453,6 +449,8 @@ void resetCrashLoop() {
   crashLoop = 0;
 }
 
+static int pingFailCount = 0; // consecutive ping failures; reset on success
+
 static void pingSuccess(esp_ping_handle_t hdl, void *args) {
   //uint32_t elapsed_time;
   //esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
@@ -465,6 +463,7 @@ static void pingSuccess(esp_ping_handle_t hdl, void *args) {
       else LOG_INF("Task ping stack space reduced to: %u", freeStack);
     }
   }
+  pingFailCount = 0;
   resetWatchDog(0, wifiTimeoutSecs * 1000 * 2);
   if (dataFilesChecked) resetCrashLoop();
   LOG_INF("Ping OK, heap: %u", ESP.getFreeHeap());
@@ -476,7 +475,6 @@ static void pingTimeout(esp_ping_handle_t hdl, void *args) {
   // but some routers may not respond to ping - https://github.com/s60sc/ESP32-CAM_MJPEG2SD/issues/221
   // so setting usePing to false ignores ping failure if connection still present
   resetWatchDog(0, wifiTimeoutSecs * 1000 * 2);
-  LOG_WRN("Ping timeout, WiFi status: %d, heap: %u, mqtt_active: %d", WiFi.STA.status(), ESP.getFreeHeap(), mqtt_active);
   if (netMode > 0) {
     if (usePing) {
       LOG_WRN("Failed to ping gateway, restart ethernet ...");
@@ -493,8 +491,19 @@ static void pingTimeout(esp_ping_handle_t hdl, void *args) {
       wl_status_t wStat = WiFi.STA.status();
       if (wStat != WL_NO_SSID_AVAIL && wStat != WL_NO_SHIELD) {
         if (usePing) {
-          LOG_WRN("Failed to ping gateway, restart wifi ...");
-          startWifi(false);
+          pingFailCount++;
+          LOG_WRN("Ping timeout %d/5, WiFi status: %d, heap: %u, mqtt_active: %d",
+                  pingFailCount, wStat, ESP.getFreeHeap(), mqtt_active);
+          if (pingFailCount < 5) return;
+          // 5 consecutive failures — stop the ping session before calling startWifi.
+          // The disconnect event handler no longer calls stopPing(), so this is the
+          // only safe place to do it: calling stopPing() from inside a ping callback
+          // on a different task (the event task) while this callback is still on the
+          // stack causes a use-after-free that crashes the firmware.
+          pingFailCount = 0;
+          stopPing();
+          LOG_WRN("Failed to ping gateway after 5 attempts, restarting wifi ...");
+          startWifi(false); // restarts ping at end via `if (pingHandle == NULL) startPing()`
         } else {
           if (wStat == WL_CONNECTED) statusCheck();
           else {
