@@ -226,6 +226,11 @@ static void setWifiSTA() {
     }
   } else LOG_INF("Wifi Station IP from DHCP");
   WiFi.STA.enableIPv6(USE_IP6);
+  // Keep radio fully awake during auth + WPA2 4-way handshake.  In the
+  // default WIFI_PS_MIN_MODEM mode the radio dozes between beacon intervals;
+  // if an EAPOL Key frame from the AP lands during a sleep window the
+  // handshake stalls and the AP times out with AUTH_EXPIRE (reason 2).
+  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.STA.begin();
   WiFi.STA.connect(ST_SSID, ST_Pass);
   debugMemory("setWifiSTA");
