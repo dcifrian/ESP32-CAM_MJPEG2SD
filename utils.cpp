@@ -226,12 +226,11 @@ static void setWifiSTA() {
     }
   } else LOG_INF("Wifi Station IP from DHCP");
   WiFi.STA.enableIPv6(USE_IP6);
-  // Keep radio fully awake during auth + WPA2 4-way handshake.  In the
-  // default WIFI_PS_MIN_MODEM mode the radio dozes between beacon intervals;
-  // if an EAPOL Key frame from the AP lands during a sleep window the
-  // handshake stalls and the AP times out with AUTH_EXPIRE (reason 2).
-  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.STA.begin();
+  // Disable modem sleep AFTER begin() — begin() may call esp_wifi_start()
+  // internally which resets power-save to WIFI_PS_MIN_MODEM.  Must be set
+  // here so the radio stays fully awake during the WPA2 4-way handshake.
+  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.STA.connect(ST_SSID, ST_Pass);
   debugMemory("setWifiSTA");
 }
@@ -338,11 +337,10 @@ static bool startWifi(bool firstcall = true) {
     // for our MAC left over from a previous crash or flash.  Without this, the
     // router holds the old association and rejects our new auth with reason 2.
     WiFi.mode(WIFI_OFF);
-    delay(500);
+    delay(2000); // give router time to process the deauth and fully clear its session state
     WiFi.mode(WIFI_STA);
     wifi_country_t country = {.cc="EU", .schan=1, .nchan=13, .max_tx_power=80, .policy=WIFI_COUNTRY_POLICY_MANUAL};
     esp_wifi_set_country(&country); // allow channels 1-13 (default US only allows 1-11)
-    WiFi.setTxPower(WIFI_POWER_8_5dBm); // reduce from default 20 dBm; high TX power causes ASSOC_EXPIRE on nearby routers
     WiFi.persistent(false); // prevent the flash storage WiFi credentials
     WiFi.STA.setAutoReconnect(false); // Set whether module will attempt to reconnect to an access point in case it is disconnected
     WiFi.STA.setHostname(hostName);
@@ -363,7 +361,6 @@ static bool startWifi(bool firstcall = true) {
           esp_wifi_stop();  // fully reset radio state — WiFi.STA.begin() is a no-op on a running stack
           delay(500);
           esp_wifi_start(); // bring radio back up before setWifiSTA
-          WiFi.setTxPower(WIFI_POWER_8_5dBm); // esp_wifi_start() resets TX power to default
           setWifiSTA();
         }
         uint32_t startAttemptTime = millis();
