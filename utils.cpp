@@ -152,7 +152,11 @@ static void onNetEvent(arduino_event_id_t event, arduino_event_info_t info) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP: LOG_INF("Wifi Station IP, use '%s://%s' to connect", useHttps ? "https" : "http", WiFi.STA.localIP().toString().c_str()); break;
     case ARDUINO_EVENT_WIFI_STA_LOST_IP: LOG_INF("Wifi Station lost IP"); break;
     case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED: break;
-    case ARDUINO_EVENT_WIFI_STA_CONNECTED: LOG_INF("WiFi Station connection to %s, using hostname: %s", ST_SSID, hostName); break;
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      LOG_INF("WiFi Station connection to %s, using hostname: %s", ST_SSID, hostName);
+      // driver can reset power-save during handshake; re-disable before DHCP starts
+      esp_wifi_set_ps(WIFI_PS_NONE);
+      break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       LOG_WRN("WiFi Station disconnected, reason: %d, heap: %u",
         info.wifi_sta_disconnected.reason, ESP.getFreeHeap());
